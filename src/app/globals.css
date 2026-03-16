@@ -1,0 +1,226 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 40 15% 97%;
+    --foreground: 0 0% 20%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 20%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 20%;
+
+    --primary: 14 52% 49%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 138 31% 87%;
+    --secondary-foreground: 138 25% 23%;
+
+    --muted: 45 22% 89%;
+    --muted-foreground: 0 0% 29%;
+
+    --accent: 25 77% 88%;
+    --accent-foreground: 23 57% 18%;
+
+    --destructive: 0 75% 42%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 41 16% 80%;
+    --input: 41 16% 80%;
+    --ring: 14 52% 49%;
+
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 30 13% 10%;
+    --foreground: 40 24% 90%;
+
+    --card: 40 24% 12%;
+    --card-foreground: 40 24% 90%;
+
+    --popover: 40 24% 12%;
+    --popover-foreground: 40 24% 90%;
+
+    --primary: 14 76% 68%;
+    --primary-foreground: 14 57% 18%;
+
+    --secondary: 36 12% 17%;
+    --secondary-foreground: 40 24% 90%;
+
+    --muted: 36 12% 17%;
+    --muted-foreground: 41 10% 62%;
+
+    --accent: 21 49% 23%;
+    --accent-foreground: 25 77% 88%;
+
+    --destructive: 0 91% 71%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 37 12% 21%;
+    --input: 37 12% 21%;
+    --ring: 14 76% 68%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  body:has(.dashboard-shell) {
+    overflow: hidden;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-heading), system-ui, sans-serif;
+  }
+}
+
+/* ── Custom scrollbar for code blocks ─────────────────────────── */
+.code-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--muted-foreground) / 0.25) transparent;
+}
+.code-scrollbar:hover {
+  scrollbar-color: hsl(var(--muted-foreground) / 0.4) transparent;
+}
+.code-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.code-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 3px;
+}
+.code-scrollbar::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--muted-foreground) / 0.2);
+  border-radius: 3px;
+  transition: background-color 0.2s;
+}
+.code-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: hsl(var(--muted-foreground) / 0.4);
+}
+.code-scrollbar::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Slim scrollbar for Monaco editor containers */
+.monaco-scrollbar .slider {
+  border-radius: 3px !important;
+}
+
+/* ── Force light theme during PDF capture ────────────────────── */
+.pdf-capture,
+.pdf-capture * {
+  --background: 40 15% 97%;
+  --foreground: 0 0% 20%;
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 20%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 0 0% 20%;
+  --primary: 19 56% 40%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 138 31% 87%;
+  --secondary-foreground: 138 25% 23%;
+  --muted: 45 22% 89%;
+  --muted-foreground: 0 0% 29%;
+  --accent: 25 77% 88%;
+  --accent-foreground: 23 57% 18%;
+  --destructive: 0 75% 42%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 41 16% 80%;
+  --input: 41 16% 80%;
+  --ring: 19 56% 40%;
+  color-scheme: light;
+}
+
+/* ── Print styles for PDF export ─────────────────────────────── */
+@media print {
+  :root {
+    color-scheme: light !important;
+    --background: 40 15% 97%;
+    --foreground: 0 0% 20%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 20%;
+    --primary: 19 56% 40%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 138 31% 87%;
+    --secondary-foreground: 138 25% 23%;
+    --muted: 45 22% 89%;
+    --muted-foreground: 0 0% 29%;
+    --border: 41 16% 80%;
+  }
+
+  html,
+  body {
+    height: auto !important;
+    overflow: visible !important;
+    background: white !important;
+    color: black !important;
+  }
+
+  aside,
+  header,
+  .no-print {
+    display: none !important;
+  }
+
+  main {
+    overflow: visible !important;
+    padding: 0 !important;
+    height: auto !important;
+  }
+
+  main > * > * {
+    overflow: visible !important;
+  }
+
+  * {
+    overflow: visible !important;
+  }
+
+  .space-y-6 > * {
+    break-inside: avoid;
+  }
+}
+
+/* AI button spinning rainbow border */
+.ai-border-spin {
+  position: relative;
+}
+.ai-border-spin::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 200%;
+  aspect-ratio: 1;
+  translate: -50% -50%;
+  background: conic-gradient(
+    from 0deg,
+    #f43f5e, #f59e0b, #10b981, #3b82f6, #8b5cf6, #f43f5e
+  );
+  border-radius: 50%;
+  animation: ai-spin 2s linear infinite;
+  will-change: transform;
+}
+@keyframes ai-spin {
+  to { rotate: 360deg; }
+}
+
+/* Guided tour */
+.tour-tooltip-enter {
+  animation: tour-fade-in 0.25s ease-out;
+}
+@keyframes tour-fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}

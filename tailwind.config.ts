@@ -1,0 +1,208 @@
+import type { Config } from "tailwindcss";
+import tailwindcssAnimate from "tailwindcss-animate";
+
+const config: Config = {
+  darkMode: ["class"],
+  content: [
+    "./src/pages/**/*.{js,ts,jsx,tsx,mdx}",
+    "./src/components/**/*.{js,ts,jsx,tsx,mdx}",
+    "./src/app/**/*.{js,ts,jsx,tsx,mdx}",
+    "./src/content/**/*.{js,ts,jsx,tsx}",
+  ],
+  theme: {
+    container: {
+      center: true,
+      padding: "2rem",
+      screens: {
+        "2xl": "1400px",
+      },
+    },
+    extend: {
+      fontFamily: {
+        heading: ["var(--font-heading)", "system-ui", "sans-serif"],
+        body: ["var(--font-body)", "system-ui", "sans-serif"],
+      },
+      colors: {
+        mk: {
+          bg: "#F5F3EF",
+          card: "#E8E4DC",
+          dark: "#1a1a1a",
+          "dark-surface": "#2a2a2a",
+          border: "#D1CCC4",
+          terracotta: "#C05A3C",
+          success: "#4A7C59",
+          info: "#5C7C8A",
+          text: "#1a1a1a",
+          "text-secondary": "#555555",
+          "text-muted": "#888888",
+          "text-light": "#F5F3EF",
+        },
+        border: "hsl(var(--border))",
+        input: "hsl(var(--input))",
+        ring: "hsl(var(--ring))",
+        background: "hsl(var(--background))",
+        foreground: "hsl(var(--foreground))",
+        primary: {
+          DEFAULT: "hsl(var(--primary))",
+          foreground: "hsl(var(--primary-foreground))",
+          50: "#FEF5F3",
+          100: "#FDE8E3",
+          200: "#FBCEC3",
+          300: "#F6AB99",
+          400: "#E8826A",
+          500: "#C05A3C",
+          600: "#A44B32",
+          700: "#883D29",
+          800: "#6E3221",
+          900: "#5A291B",
+        },
+        secondary: {
+          DEFAULT: "hsl(var(--secondary))",
+          foreground: "hsl(var(--secondary-foreground))",
+          50: "#F4F8F5",
+          100: "#E8F0E8",
+          200: "#D4E8DA",
+          300: "#B5D8C2",
+          400: "#8EC2A2",
+          500: "#6B8E7A",
+          600: "#5A7A68",
+          700: "#4A6456",
+          800: "#3B5045",
+          900: "#2F4038",
+        },
+        tertiary: {
+          DEFAULT: "#FFBF00",
+          foreground: "#333333",
+          50: "#FFFBEB",
+          100: "#FFF3C4",
+          200: "#FCE588",
+          300: "#FCD34D",
+          400: "#FBBF24",
+          500: "#FFBF00",
+          600: "#E6A700",
+          700: "#CC9500",
+          800: "#997000",
+          900: "#665000",
+        },
+        destructive: {
+          DEFAULT: "hsl(var(--destructive))",
+          foreground: "hsl(var(--destructive-foreground))",
+          50: "#FEF2F2",
+          100: "#FEE2E2",
+          200: "#FECACA",
+          300: "#FCA5A5",
+          400: "#F87171",
+          500: "#BA1A1A",
+          600: "#DC2626",
+          700: "#B91C1C",
+          800: "#991B1B",
+          900: "#7F1D1D",
+        },
+        muted: {
+          DEFAULT: "hsl(var(--muted))",
+          foreground: "hsl(var(--muted-foreground))",
+        },
+        accent: {
+          DEFAULT: "hsl(var(--accent))",
+          foreground: "hsl(var(--accent-foreground))",
+        },
+        popover: {
+          DEFAULT: "hsl(var(--popover))",
+          foreground: "hsl(var(--popover-foreground))",
+        },
+        card: {
+          DEFAULT: "hsl(var(--card))",
+          foreground: "hsl(var(--card-foreground))",
+        },
+        brand: {
+          sand: "#F5F2EB",
+          terracotta: "#C05A3C",
+          amber: "#FFBF00",
+          charcoal: "#333333",
+        },
+        surface: {
+          dim: "#D4CFC4",
+          DEFAULT: "#F5F2EB",
+          bright: "#FAFAF8",
+          "container-lowest": "#FFFFFF",
+          "container-low": "#F0EDE6",
+          container: "#EAE7DE",
+          "container-high": "#E0DCD3",
+          "container-highest": "#D6D1C7",
+          variant: "#E8E4DC",
+        },
+        outline: {
+          DEFAULT: "#A8A295",
+          variant: "#D4CFC4",
+        },
+      },
+      borderRadius: {
+        lg: "var(--radius)",
+        md: "calc(var(--radius) - 2px)",
+        sm: "calc(var(--radius) - 4px)",
+      },
+      keyframes: {
+        "accordion-down": {
+          from: { height: "0" },
+          to: { height: "var(--radix-accordion-content-height)" },
+        },
+        "accordion-up": {
+          from: { height: "var(--radix-accordion-content-height)" },
+          to: { height: "0" },
+        },
+        "fade-up": {
+          from: { opacity: "0", transform: "translateY(30px)" },
+          to: { opacity: "1", transform: "translateY(0)" },
+        },
+        "fade-in": {
+          from: { opacity: "0" },
+          to: { opacity: "1" },
+        },
+        "slide-in-left": {
+          from: { opacity: "0", transform: "translateX(-40px)" },
+          to: { opacity: "1", transform: "translateX(0)" },
+        },
+        "slide-in-right": {
+          from: { opacity: "0", transform: "translateX(40px)" },
+          to: { opacity: "1", transform: "translateX(0)" },
+        },
+        "pulse-ring": {
+          "0%": { transform: "scale(1)", opacity: "0.6" },
+          "100%": { transform: "scale(2.2)", opacity: "0" },
+        },
+        shimmer: {
+          "0%": { backgroundPosition: "-200% 0" },
+          "100%": { backgroundPosition: "200% 0" },
+        },
+        "progress-fill": {
+          from: { width: "0%" },
+          to: { width: "100%" },
+        },
+        "marquee-left": {
+          from: { transform: "translateX(0)" },
+          to: { transform: "translateX(-50%)" },
+        },
+        "marquee-right": {
+          from: { transform: "translateX(-50%)" },
+          to: { transform: "translateX(0)" },
+        },
+      },
+      animation: {
+        "accordion-down": "accordion-down 0.2s ease-out",
+        "accordion-up": "accordion-up 0.2s ease-out",
+        "fade-up": "fade-up 0.7s ease-out forwards",
+        "fade-in": "fade-in 0.7s ease-out forwards",
+        "slide-in-left": "slide-in-left 0.7s ease-out forwards",
+        "slide-in-right": "slide-in-right 0.7s ease-out forwards",
+        "pulse-ring": "pulse-ring 1.5s cubic-bezier(0.4,0,0.2,1) infinite",
+        shimmer: "shimmer 3s ease-in-out infinite",
+        "progress-fill": "progress-fill 6s linear forwards",
+        "marquee-left": "marquee-left 45s linear infinite",
+        "marquee-right": "marquee-right 50s linear infinite",
+      },
+    },
+  },
+  plugins: [tailwindcssAnimate],
+};
+
+export default config;

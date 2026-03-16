@@ -1,0 +1,23 @@
+/* Hide the Library sidebar trigger button */
+.excalidraw .sidebar-trigger {
+  display: none !important;
+}
+
+/* Hide the Help button in the lower-right corner */
+.excalidraw .help-icon,
+.excalidraw .HelpButton,
+.excalidraw [data-testid="help-icon"] {
+  display: none !important;
+}
+
+/* Hide "Web Embed" in the More Tools dropdown */
+.excalidraw [data-testid="toolbar-embeddable"] {
+  display: none !important;
+}
+
+/* Hide the "Generate" section title in the More Tools dropdown.
+   It is rendered as a plain <div> with inline font-weight:600 inside
+   the dropdown-menu-container, so we target it via that style. */
+.excalidraw .dropdown-menu-container div[style*="font-weight"] {
+  display: none !important;
+}

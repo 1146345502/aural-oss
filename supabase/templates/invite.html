@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&display=swap">
+</head>
+<body style="margin:0;padding:0;background-color:#F5F2EB;font-family:'Space Grotesk',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#F5F2EB;padding:40px 0;">
+    <tr><td align="center">
+      <table width="480" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;">
+        <tr><td style="padding:40px 32px;text-align:center;">
+
+          <!-- Logo -->
+          <table cellpadding="0" cellspacing="0" style="margin:0 auto 24px;">
+            <tr>
+              <td style="width:36px;height:36px;background:#C05A3C;border-radius:8px;text-align:center;vertical-align:middle;color:#ffffff;font-size:16px;font-weight:700;line-height:36px;font-family:'Space Grotesk',-apple-system,BlinkMacSystemFont,sans-serif;">A</td>
+              <td style="padding-left:8px;font-family:'Space Grotesk',-apple-system,BlinkMacSystemFont,sans-serif;font-size:16px;font-weight:700;letter-spacing:2px;color:#1a1a1a;vertical-align:middle;">AURAL</td>
+            </tr>
+          </table>
+
+          <!-- Heading -->
+          <h2 style="margin:0 0 8px;font-size:20px;font-weight:700;color:#1a1a1a;font-family:'Space Grotesk',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">You've been invited to Aural</h2>
+          <p style="margin:0 0 28px;font-size:14px;color:#555555;line-height:1.5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">Click the button below to accept the invitation and get started:</p>
+
+          <!-- Button -->
+          <table cellpadding="0" cellspacing="0" style="margin:0 auto 28px;">
+            <tr><td style="background:#C05A3C;border-radius:8px;padding:0;">
+              <a href="{{ .ConfirmationURL }}" style="display:inline-block;padding:14px 32px;color:#ffffff;font-size:16px;font-weight:600;text-decoration:none;font-family:'Space Grotesk',-apple-system,sans-serif;">Accept Invitation</a>
+            </td></tr>
+          </table>
+
+          <!-- Fallback link -->
+          <p style="margin:0 0 8px;font-size:13px;color:#555555;line-height:1.5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">Or copy and paste this link into your browser:</p>
+          <p style="margin:0 0 28px;font-size:12px;color:#C05A3C;line-height:1.5;word-break:break-all;">{{ .ConfirmationURL }}</p>
+
+          <!-- Disclaimer -->
+          <p style="margin:0;font-size:13px;color:#888888;line-height:1.5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">If you weren't expecting this invitation, you can safely ignore this email.</p>
+
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>
