@@ -26,7 +26,7 @@ export interface RelaySocketLike {
   close(code?: number, reason?: string): void;
 }
 
-interface RelayMessageContext<TJsonMessage> {
+interface RelayMessageContext<TJsonMessage extends Record<string, unknown>> {
   target: RelayTarget;
   isFailover: boolean;
   connector: RelayConnector<TJsonMessage>;

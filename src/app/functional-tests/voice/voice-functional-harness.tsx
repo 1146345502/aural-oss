@@ -88,7 +88,7 @@ function installFunctionalRelayMocks(scenario: FunctionalScenario) {
     });
   }
   navigator.mediaDevices.getUserMedia = async () =>
-    ({ getTracks: () => [] }) as MediaStream;
+    ({ getTracks: () => [] }) as unknown as MediaStream;
 
   if (window.__functionalRelayMockInstalled) {
     return;
@@ -179,7 +179,7 @@ function installFunctionalRelayMocks(scenario: FunctionalScenario) {
     }
   }
 
-  window.WebSocket = function functionalWebSocket(url, protocols) {
+  window.WebSocket = function functionalWebSocket(url: string | URL, protocols?: string | string[]) {
     const resolved = new URL(String(url), window.location.href);
     const path = normalizePath(resolved.pathname);
     if (relayPaths.has(path)) {

@@ -5,7 +5,7 @@ import { getProvider, REPORT_MODEL } from "@/lib/ai/registry";
 import { createLogger } from "@/lib/logger";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { NextResponse } from "next/server";
-import { handleVoiceSave, type VoiceSaveOps, type VoiceSavePayload } from "./logic";
+import { handleVoiceSave, type CompletionSession, type ProgressSession, type VoiceSaveOps, type VoiceSavePayload } from "./logic";
 
 const log = createLogger("api/voice/save");
 const voiceSaveOps: VoiceSaveOps = {

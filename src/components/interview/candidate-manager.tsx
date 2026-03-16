@@ -807,8 +807,8 @@ export function CandidateManager({
 
   // ── Stats ──
   const totalCandidates = candidates.length + walkIns.length;
-  const completedCount = allRows.filter(
-    (r) => getSessionStatus(r) === "COMPLETED",
+  const completedCount = [...candidates, ...walkIns].filter(
+    (r: UnifiedRow) => getSessionStatus(r) === "COMPLETED",
   ).length;
 
   return (
