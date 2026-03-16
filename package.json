@@ -2,6 +2,17 @@
   "name": "aural",
   "version": "0.1.0",
   "private": true,
+  "description": "Open-source AI interview platform for voice, chat, and video",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/1146345502/aural-oss.git"
+  },
+  "homepage": "https://github.com/1146345502/aural-oss#readme",
+  "bugs": {
+    "url": "https://github.com/1146345502/aural-oss/issues"
+  },
+  "license": "MIT",
+  "author": "Aural",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
