@@ -151,8 +151,6 @@ test("handleVoiceSave inserts mapped text messages before updating completion st
     "en",
     [{ text: "Describe your system.", order: 0, type: "OPEN_ENDED" }],
     [{ name: "Depth", description: "Technical depth" }],
-    "user-1",
-    "project-1",
   ]);
   assert.ok(
     infoLogs.some((message) =>
