@@ -4,61 +4,61 @@
 import { useAppLocale } from "@/components/app-locale-provider";
 import { useProject } from "@/components/project-provider";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
+    Popover,
+    PopoverContent,
+    PopoverTrigger,
 } from "@/components/ui/popover";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow,
 } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { exportToXlsx } from "@/lib/export-xlsx";
 import { getSessionOverallScore } from "@/lib/session-score";
 import { trpc } from "@/lib/trpc/client";
 import {
-  ArrowDown,
-  ArrowUp,
-  ArrowUpDown,
-  Calendar,
-  Check,
-  ChevronLeft,
-  ChevronRight,
-  CircleDot,
-  Download,
-  ExternalLink,
-  GripVertical,
-  Loader2,
-  Search,
-  Settings,
-  Trash2,
-  X,
+    ArrowDown,
+    ArrowUp,
+    ArrowUpDown,
+    Calendar,
+    Check,
+    ChevronLeft,
+    ChevronRight,
+    CircleDot,
+    Download,
+    ExternalLink,
+    GripVertical,
+    Loader2,
+    Search,
+    Settings,
+    Trash2,
+    X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -212,15 +212,6 @@ const DEFAULT_VISIBLE = new Set(
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50];
 
-const TIME_RANGE_OPTIONS = [
-  { value: "ALL", label: "All Time" },
-  { value: "1d", label: "Past 1 day" },
-  { value: "3d", label: "Past 3 days" },
-  { value: "7d", label: "Past 7 days" },
-  { value: "14d", label: "Past 14 days" },
-  { value: "30d", label: "Past 30 days" },
-  { value: "90d", label: "Past 90 days" },
-] as const;
 
 function getTimeRangeCutoff(value: string): Date | null {
   const now = Date.now();
@@ -425,7 +416,7 @@ export default function CandidatesPage() {
     { value: "30d", label: isZh ? "过去 30 天" : "Past 30 days" },
     { value: "90d", label: isZh ? "过去 90 天" : "Past 90 days" },
   ];
-  const statusLabel = (status: string) => {
+  const statusLabel = useCallback((status: string) => {
     if (!isZh)
       return status === "Not Started"
         ? "NOT STARTED"
@@ -442,15 +433,15 @@ export default function CandidatesPage() {
       default:
         return status;
     }
-  };
-  const sourceLabel = (source: "walkin" | "candidate") =>
+  }, [isZh]);
+  const sourceLabel = useCallback((source: "walkin" | "candidate") =>
     source === "walkin"
       ? isZh
         ? "现场"
         : "Walk-in"
       : isZh
         ? "邀请"
-        : "Invited";
+        : "Invited", [isZh]);
 
   // ── State ──
   const [searchQuery, setSearchQuery] = useState("");
@@ -610,12 +601,12 @@ export default function CandidatesPage() {
     }),
   );
 
-  const allRows: UnifiedRow[] = [...candidates, ...walkIns];
   const isFiltering =
     searchQuery.trim() || statusFilter !== "ALL" || timeRange !== "ALL";
 
   // ── Filter + Sort ──
   const processedRows = useMemo(() => {
+    const allRows: UnifiedRow[] = [...candidates, ...walkIns];
     let result = allRows;
 
     if (searchQuery.trim()) {
@@ -658,7 +649,7 @@ export default function CandidatesPage() {
     }
 
     return result;
-  }, [allRows, searchQuery, statusFilter, timeRange, sortKey, sortDir]);
+  }, [candidates, walkIns, searchQuery, statusFilter, timeRange, sortKey, sortDir]);
 
   // ── Pagination ──
   const totalPages = Math.max(1, Math.ceil(processedRows.length / pageSize));

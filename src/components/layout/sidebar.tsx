@@ -141,10 +141,8 @@ function SidebarLink({
   );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function Sidebar({
   collapsed,
-  onToggle,
 }: {
   collapsed: boolean;
   onToggle: () => void;

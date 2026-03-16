@@ -1,26 +1,26 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useOrg } from "@/components/org-provider";
 import { AiButton } from "@/components/ui/ai-button";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogHeader,
+    DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  CheckCircle2,
-  FileText,
-  Loader2,
-  Upload,
-  X,
-  AlertCircle,
-} from "lucide-react";
-import { trpc } from "@/lib/trpc/client";
 import { useToast } from "@/hooks/use-toast";
-import { useOrg } from "@/components/org-provider";
+import { trpc } from "@/lib/trpc/client";
+import {
+    AlertCircle,
+    CheckCircle2,
+    FileText,
+    Loader2,
+    Upload,
+    X,
+} from "lucide-react";
+import { useCallback, useRef, useState } from "react";
 
 interface ResumeImportDialogProps {
   interviewId: string;
@@ -215,7 +215,7 @@ export function ResumeImportDialog({
 
     setIsParsing(false);
     if (successCount > 0) setStep("preview");
-  }, [entries]);
+  }, [entries, currentOrg?.id, interviewId]);
 
   const successEntries = entries.filter((e) => e.status === "done" && e.parsed);
 

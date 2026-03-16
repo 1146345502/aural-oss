@@ -50,8 +50,6 @@ export type VoiceSaveOps = {
     language?: string | null,
     questions?: { text: string; order: number; type?: string }[] | null,
     assessmentCriteria?: { name: string; description: string }[] | null,
-    ownerUserId?: string,
-    projectId?: string,
   ) => Promise<void>;
   log: {
     info: (message: string) => void;
@@ -106,8 +104,6 @@ export async function handleVoiceSave(
             interview.language,
             interview.questions,
             interview.assessmentCriteria,
-            interview.userId,
-            interview.projectId,
           )
           .catch((err) => {
             ops.log.error("Background summary generation failed:", err);

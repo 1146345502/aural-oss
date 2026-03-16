@@ -1,13 +1,13 @@
-import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabase/admin";
+import { svgDataUrlToPng } from "@/lib/ai/convert-svg";
+import { extractJson } from "@/lib/ai/extract-json";
+import { buildSummaryPrompt } from "@/lib/ai/prompts/summary";
+import { getProvider, REPORT_MODEL } from "@/lib/ai/registry";
 import { createLogger } from "@/lib/logger";
+import { supabaseAdmin } from "@/lib/supabase/admin";
+import { NextResponse } from "next/server";
 import { handleVoiceSave, type VoiceSaveOps, type VoiceSavePayload } from "./logic";
 
 const log = createLogger("api/voice/save");
-import { getProvider, REPORT_MODEL } from "@/lib/ai/registry";
-import { buildSummaryPrompt } from "@/lib/ai/prompts/summary";
-import { svgDataUrlToPng } from "@/lib/ai/convert-svg";
-import { extractJson } from "@/lib/ai/extract-json";
 const voiceSaveOps: VoiceSaveOps = {
   async insertMessages(sessionId, messages) {
     await supabaseAdmin.from("messages").insert(
@@ -87,8 +87,6 @@ async function generateSummary(
   language?: string | null,
   questions?: { text: string; order: number; type?: string }[] | null,
   assessmentCriteria?: { name: string; description: string }[] | null,
-  ownerUserId?: string,
-  projectId?: string,
 ): Promise<void> {
   try {
     const { data: allMessages } = await supabaseAdmin

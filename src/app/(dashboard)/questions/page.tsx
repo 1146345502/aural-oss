@@ -1,70 +1,70 @@
 "use client";
 
 import { useAppLocale } from "@/components/app-locale-provider";
-import { useCallback, useMemo, useState } from "react";
-import { trpc } from "@/lib/trpc/client";
-import { useToast } from "@/hooks/use-toast";
 import { useProject } from "@/components/project-provider";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow,
 } from "@/components/ui/table";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  ArrowDown,
-  ArrowUp,
-  ArrowUpDown,
-  Calendar,
-  ChevronLeft,
-  ChevronRight,
-  CircleDot,
-  Code2,
-  Copy,
-  HelpCircle,
-  ListChecks,
-  Loader2,
-  MessageSquare,
-  Microscope,
-  PenLine,
-  Search,
-  Trash2,
-  X,
-  Download,
-} from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 import { exportToXlsx } from "@/lib/export-xlsx";
+import { trpc } from "@/lib/trpc/client";
+import {
+    ArrowDown,
+    ArrowUp,
+    ArrowUpDown,
+    Calendar,
+    ChevronLeft,
+    ChevronRight,
+    CircleDot,
+    Code2,
+    Copy,
+    Download,
+    HelpCircle,
+    ListChecks,
+    Loader2,
+    MessageSquare,
+    Microscope,
+    PenLine,
+    Search,
+    Trash2,
+    X,
+} from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                          */
@@ -112,30 +112,7 @@ const QUESTION_TYPE_META: Record<
   },
 };
 
-const TYPE_OPTIONS = [
-  { value: "ALL", label: "All Types" },
-  { value: "OPEN_ENDED", label: "Open Ended" },
-  { value: "SINGLE_CHOICE", label: "Single Choice" },
-  { value: "MULTIPLE_CHOICE", label: "Multiple Choice" },
-  { value: "CODING", label: "Coding" },
-  { value: "WHITEBOARD", label: "Whiteboard" },
-  { value: "RESEARCH", label: "Research" },
-] as const;
-
 const PAGE_SIZE_OPTIONS = [10, 20, 50];
-
-const TIME_RANGE_OPTIONS = [
-  { value: "ALL", label: "All Time" },
-  { value: "30m", label: "Past 30 min" },
-  { value: "1h", label: "Past 1 hour" },
-  { value: "6h", label: "Past 6 hours" },
-  { value: "1d", label: "Past 1 day" },
-  { value: "3d", label: "Past 3 days" },
-  { value: "7d", label: "Past 7 days" },
-  { value: "14d", label: "Past 14 days" },
-  { value: "30d", label: "Past 30 days" },
-  { value: "90d", label: "Past 90 days" },
-] as const;
 
 function getTimeRangeCutoff(value: string): Date | null {
   const now = Date.now();
@@ -239,7 +216,7 @@ export default function QuestionsPage() {
   const { currentProject } = useProject();
   const projectId = currentProject?.id;
   const isZh = locale === "zh";
-  const questionTypeMeta = {
+  const questionTypeMeta = useMemo(() => ({
     OPEN_ENDED: {
       ...QUESTION_TYPE_META.OPEN_ENDED,
       label: isZh ? "开放题" : "Open Ended",
@@ -264,7 +241,7 @@ export default function QuestionsPage() {
       ...QUESTION_TYPE_META.RESEARCH,
       label: isZh ? "调研题" : "Research",
     },
-  };
+  }), [isZh]);
   const typeOptions = [
     { value: "ALL", label: isZh ? "全部类型" : "All Types" },
     { value: "OPEN_ENDED", label: questionTypeMeta.OPEN_ENDED.label },

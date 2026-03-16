@@ -374,7 +374,7 @@ export function AIGenerator({ projectId }: { projectId?: string } = {}) {
           ? { ...q.starterCode, language: q.starterCode.language.toLowerCase() }
           : undefined,
       })));
-    } catch (err) {
+    } catch {
       toast({ title: "Generation failed", description: "Please try again or create the interview manually.", variant: "destructive" });
     } finally {
       setGenerating(false);
@@ -427,7 +427,7 @@ export function AIGenerator({ projectId }: { projectId?: string } = {}) {
       setEditingIndex(null);
       setEditingCriterionIndex(null);
       toast({ title: "Interview refined based on your feedback!" });
-    } catch (err) {
+    } catch {
       toast({ title: "Refinement failed", description: "Please try again.", variant: "destructive" });
     } finally {
       setRefining(false);

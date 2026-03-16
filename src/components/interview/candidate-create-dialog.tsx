@@ -1,45 +1,45 @@
 "use client";
 
+import { useOrg } from "@/components/org-provider";
 import { AiButton } from "@/components/ui/ai-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
+    Popover,
+    PopoverContent,
+    PopoverTrigger,
 } from "@/components/ui/popover";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
 } from "@/components/ui/select";
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
+    Sheet,
+    SheetContent,
+    SheetDescription,
+    SheetFooter,
+    SheetHeader,
+    SheetTitle,
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { trpc } from "@/lib/trpc/client";
 import { cn } from "@/lib/utils";
 import {
-  CalendarIcon,
-  ChevronLeft,
-  ChevronRight,
-  FileText,
-  Loader2,
-  Sparkles,
-  Upload,
-  X,
+    CalendarIcon,
+    ChevronLeft,
+    ChevronRight,
+    FileText,
+    Loader2,
+    Sparkles,
+    Upload,
+    X,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useOrg } from "@/components/org-provider";
 
 const EDUCATION_OPTIONS = ["College", "Bachelor", "Master", "PhD", "MBA", "Other"];
 const WORK_EXPERIENCE_OPTIONS = [
@@ -395,7 +395,7 @@ export function CandidateCreateDialog({
         setParsingResume(false);
       }
     },
-    [toast],
+    [toast, currentOrg?.id, interviewId],
   );
 
   return (

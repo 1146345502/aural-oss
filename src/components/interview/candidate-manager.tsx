@@ -2,75 +2,75 @@
 "use client";
 
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { getSessionOverallScore } from "@/lib/session-score";
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
+    Popover,
+    PopoverContent,
+    PopoverTrigger,
 } from "@/components/ui/popover";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
 } from "@/components/ui/select";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow,
 } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { exportToXlsx } from "@/lib/export-xlsx";
+import { getSessionOverallScore } from "@/lib/session-score";
 import { trpc } from "@/lib/trpc/client";
 import {
-  ArrowDown,
-  ArrowUp,
-  ArrowUpDown,
-  Calendar,
-  Check,
-  ChevronLeft,
-  ChevronRight,
-  CircleDot,
-  ClipboardList,
-  Clock,
-  Download,
-  FileSpreadsheet,
-  FileText,
-  GripVertical,
-  Link as LinkIcon,
-  Loader2,
-  Plus,
-  Search,
-  Settings,
-  Trash2,
-  UserCheck,
-  UserPlus,
-  Users,
-  X,
+    ArrowDown,
+    ArrowUp,
+    ArrowUpDown,
+    Calendar,
+    Check,
+    ChevronLeft,
+    ChevronRight,
+    CircleDot,
+    ClipboardList,
+    Clock,
+    Download,
+    FileSpreadsheet,
+    FileText,
+    GripVertical,
+    Link as LinkIcon,
+    Loader2,
+    Plus,
+    Search,
+    Settings,
+    Trash2,
+    UserCheck,
+    UserPlus,
+    Users,
+    X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CandidateCreateDialog } from "./candidate-create-dialog";
@@ -403,7 +403,6 @@ function SortableHead({
 
 export function CandidateManager({
   interviewId,
-  interview,
   onViewSession,
 }: CandidateManagerProps) {
   const { toast } = useToast();
@@ -514,19 +513,6 @@ export function CandidateManager({
   const candidateList = trpc.candidate.list.useQuery({ interviewId });
   const insights = trpc.analysis.getInterviewInsights.useQuery({ interviewId });
 
-  const removeMutation = trpc.candidate.remove.useMutation({
-    onSuccess: () => {
-      toast({ title: "Session removed" });
-      invalidateAll();
-    },
-    onError: (err) => {
-      toast({
-        title: "Failed to remove",
-        description: err.message,
-        variant: "destructive",
-      });
-    },
-  });
   const removeCandidatesMutation = trpc.candidate.removeMany.useMutation({
     onSuccess: () => invalidateAll(),
     onError: (err) => {
@@ -594,15 +580,14 @@ export function CandidateManager({
     }),
   );
 
-  const allRows: UnifiedRow[] = [...candidates, ...walkIns];
   const isFiltering =
     searchQuery.trim() || statusFilter !== "ALL" || timeRange !== "ALL";
 
   // ── Filter + Sort ──
   const processedRows = useMemo(() => {
+    const allRows: UnifiedRow[] = [...candidates, ...walkIns];
     let result = allRows;
 
-    // Search
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       result = result.filter(
@@ -612,7 +597,6 @@ export function CandidateManager({
       );
     }
 
-    // Status filter
     if (statusFilter !== "ALL") {
       result = result.filter((row) => {
         const s = getSessionStatus(row);
@@ -621,7 +605,6 @@ export function CandidateManager({
       });
     }
 
-    // Time range filter
     const cutoff = getTimeRangeCutoff(timeRange);
     if (cutoff) {
       result = result.filter((row) => {
@@ -631,7 +614,6 @@ export function CandidateManager({
       });
     }
 
-    // Sort
     if (sortKey) {
       result = [...result].sort((a, b) => {
         const va = getSortValue(a, sortKey);
@@ -645,7 +627,7 @@ export function CandidateManager({
     }
 
     return result;
-  }, [allRows, searchQuery, statusFilter, timeRange, sortKey, sortDir]);
+  }, [candidates, walkIns, searchQuery, statusFilter, timeRange, sortKey, sortDir]);
 
   // ── Pagination ──
   const totalPages = Math.max(1, Math.ceil(processedRows.length / pageSize));

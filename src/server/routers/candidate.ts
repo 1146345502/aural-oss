@@ -1,14 +1,9 @@
-import { z } from "zod";
-import { router, protectedProcedure, publicProcedure } from "../trpc";
-import { TRPCError } from "@trpc/server";
 import { nanoid } from "@/lib/id";
+import { TRPCError } from "@trpc/server";
+import { z } from "zod";
 import {
-  getOrgMembership,
-  assertMinRole,
-  hasProjectAccess,
-  filterAccessibleProjectIds,
-  getEffectiveProjectRole,
-  type MemberRole,
+    assertMinRole, filterAccessibleProjectIds,
+    getEffectiveProjectRole, getOrgMembership, hasProjectAccess, protectedProcedure, publicProcedure, router, type MemberRole
 } from "../trpc";
 const candidateFields = z.object({
   name: z.string().min(1),
@@ -79,7 +74,7 @@ export const candidateRouter = router({
     .mutation(async ({ ctx, input }) => {
       const { interviewId, ...fields } = input;
 
-      const { role, organizationId } = await verifyInterviewAccess(
+      const { role } = await verifyInterviewAccess(
         ctx.supabase,
         interviewId,
         ctx.user.id,
@@ -117,7 +112,7 @@ export const candidateRouter = router({
     .mutation(async ({ ctx, input }) => {
       const { interviewId, candidates } = input;
 
-      const { role, organizationId } = await verifyInterviewAccess(
+      const { role } = await verifyInterviewAccess(
         ctx.supabase,
         interviewId,
         ctx.user.id,

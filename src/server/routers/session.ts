@@ -1,5 +1,4 @@
 import { createLogger } from "@/lib/logger";
-import { supabaseAdmin } from "@/lib/supabase/admin";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { filterAccessibleProjectIds, hasProjectAccess, protectedProcedure, publicProcedure, router } from "../trpc";

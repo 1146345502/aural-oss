@@ -105,14 +105,13 @@ export default function EditInterviewLayout({
                 className="cursor-pointer gap-1 border-border bg-background text-foreground hover:bg-muted"
                 onClick={() => {
                   navigator.clipboard.writeText(
-                    `${window.location.origin}/i/${(data as any).publicSlug}`,
+                    `${window.location.origin}/i/${(data as Record<string, unknown>).publicSlug}`,
                   );
                   toast({ title: "Link copied!" });
                 }}
               >
                 <Link2 className="h-3 w-3" />
-                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                /i/{(data as any).publicSlug}
+                /i/{(data as Record<string, unknown>).publicSlug as string}
               </Badge>
             ) : (
               <Badge variant="secondary" className="gap-1">
