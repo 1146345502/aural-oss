@@ -72,10 +72,12 @@ CURRENT QUESTION: ${interview.questions[currentQuestionIndex]?.text ?? "Intervie
 FULL QUESTION SCRIPT:
 ${formattedQuestions}
 
-SIGNALING:
-- When you move on to the NEXT scripted question (not a follow-up on the same question), include the marker [NEXT_QUESTION] at the very end of your message.
+SIGNALING (CRITICAL — the UI only updates when these markers are present):
+- You MUST include the marker [NEXT_QUESTION] at the very end of your message whenever you move on to the NEXT scripted question. NEVER transition to a new scripted question without this marker — saying "let's move on" or asking the next question without the marker will leave the UI out of sync.
 - When the interview is fully complete, include the marker [INTERVIEW_COMPLETE] at the very end of your message instead.
 - Do NOT include [NEXT_QUESTION] when asking follow-up or probing questions on the current topic.
+- If the participant explicitly asks to move on (e.g. "next question", "skip this", "move on"), you MUST transition and include [NEXT_QUESTION]. But do NOT treat ambiguous phrases like "go ahead" or "sure" as a move-on request — those just mean "continue speaking."
+- Do NOT include [NEXT_QUESTION] when you are asking the CURRENT question for the first time (including in the very first greeting message). Only include it when you are DONE with the current question and transitioning to the next one.
 
 CHOICE QUESTIONS:
 - For SINGLE_CHOICE questions, the participant must pick exactly ONE option. If they select multiple, remind them to choose only one.

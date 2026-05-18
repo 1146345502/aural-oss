@@ -19,6 +19,7 @@ import {
     Check,
     ChevronDown,
     ChevronLeft,
+    ChevronRight,
     ChevronUp,
     Clock,
     Code2,
@@ -97,6 +98,7 @@ export function ChatInterface({
   const timerExpiredRef = useRef(false);
   const timerStartedRef = useRef(false);
   const initialMessageCount = useRef(initialMessages?.length ?? 0);
+  const greetingRequestedRef = useRef(false);
 
   useEffect(() => {
     if (timerStartedRef.current || !durationMinutes) return;
@@ -323,7 +325,9 @@ export function ChatInterface({
 
   // Initialize: get AI greeting (skip when resuming with existing messages)
   useEffect(() => {
+    if (greetingRequestedRef.current) return;
     if (!initialMessages?.length) {
+      greetingRequestedRef.current = true;
       getAIResponse([]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -856,6 +860,84 @@ export function ChatInterface({
     }
   }
 
+  async function handleNextQuestion() {
+    if (currentQuestion >= interview.questions.length - 1 || sending || aiTyping) return;
+
+    const nextIdx = currentQuestion + 1;
+    setCurrentQuestion(nextIdx);
+
+    const nextQuestionId = interview.questions[nextIdx]?.id;
+    if (nextQuestionId) {
+      fetch("/api/trpc/session.updateCurrentQuestion", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          json: { sessionId, questionId: nextQuestionId },
+        }),
+      }).catch(() => {});
+    }
+
+    const skipMsg: Message = {
+      id: crypto.randomUUID(),
+      role: "USER",
+      content: `[Moving to the next question.]`,
+      timestamp: new Date().toISOString(),
+    };
+
+    const updatedMessages = [...messages, skipMsg];
+    setMessages(updatedMessages);
+    setSending(true);
+
+    try {
+      await fetch("/api/trpc/session.sendMessage", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          json: {
+            sessionId,
+            content: skipMsg.content,
+            questionId: nextQuestionId,
+          },
+        }),
+      });
+
+      setAiTyping(true);
+      const response = await fetch("/api/ai/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId,
+          interviewId: interview.id,
+          messages: updatedMessages.map((m) => ({
+            role: m.role === "USER" ? "user" : "assistant",
+            content: m.content,
+          })),
+          currentQuestionIndex: nextIdx,
+        }),
+      });
+
+      const data = await response.json();
+      const aiMessage: Message = {
+        id: crypto.randomUUID(),
+        role: "ASSISTANT",
+        content: data.content,
+        timestamp: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, aiMessage]);
+
+      if (data.questionAdvanced) {
+        setCurrentQuestion((prev) =>
+          Math.min(prev + 1, interview.questions.length)
+        );
+      }
+    } catch (error) {
+      console.error("Next question error:", error);
+    } finally {
+      setSending(false);
+      setAiTyping(false);
+    }
+  }
+
   async function handleSend() {
     if (preview || !input.trim() || sending) return;
 
@@ -902,7 +984,7 @@ export function ChatInterface({
 
   const progress =
     interview.questions.length > 0
-      ? (currentQuestion / interview.questions.length) * 100
+      ? ((currentQuestion + 1) / interview.questions.length) * 100
       : 0;
 
   const formatTime = (totalSec: number) => {
@@ -1061,12 +1143,6 @@ export function ChatInterface({
             <Send className="h-4 w-4" />
           )}
         </Button>
-        {remainingSeconds !== null && (
-          <div className={`flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium tabular-nums ${isTimeLow ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground"}`}>
-            <Clock className="h-3.5 w-3.5" />
-            <span>{formatTime(remainingSeconds)} left</span>
-          </div>
-        )}
       </div>
     </div>
   );
@@ -1402,7 +1478,15 @@ export function ChatInterface({
       <div className="border-b bg-card px-3 py-2 md:px-4 md:py-3">
         <div className="mx-auto flex max-w-3xl items-center justify-between">
           <div className="mr-2 min-w-0 flex-1">
-            <h1 className="truncate text-sm font-semibold md:text-base">{interview.title}</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="truncate text-sm font-semibold md:text-base">{interview.title}</h1>
+              {remainingSeconds !== null && (
+                <div className={`flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium tabular-nums ${isTimeLow ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground"}`}>
+                  <Clock className="h-3 w-3" />
+                  <span>{formatTime(remainingSeconds)}</span>
+                </div>
+              )}
+            </div>
             <p className="hidden text-xs text-muted-foreground md:block">
               Interviewer: {interview.aiName}
             </p>
@@ -1417,6 +1501,16 @@ export function ChatInterface({
               title="Return to previous question"
             >
               <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 w-7 p-0"
+              onClick={handleNextQuestion}
+              disabled={currentQuestion >= interview.questions.length - 1 || sending || aiTyping}
+              title="Skip to next question"
+            >
+              <ChevronRight className="h-4 w-4" />
             </Button>
             <Badge variant="outline" className="shrink-0">
               Q{Math.min(currentQuestion + 1, interview.questions.length)}/{interview.questions.length}
