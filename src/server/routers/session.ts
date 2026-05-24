@@ -252,6 +252,7 @@ export const sessionRouter = router({
           .enum(["TEXT", "AUDIO", "FILE", "IMAGE", "WHITEBOARD"])
           .default("TEXT"),
         questionId: z.string().optional(),
+        internal: z.boolean().optional().default(false),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -279,7 +280,7 @@ export const sessionRouter = router({
         .from("messages")
         .insert({
           sessionId: input.sessionId,
-          role: "USER" as const,
+          role: input.internal ? ("SYSTEM" as const) : ("USER" as const),
           content: input.content,
           contentType: input.contentType,
           questionId: input.questionId ?? null,

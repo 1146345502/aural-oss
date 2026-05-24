@@ -140,7 +140,7 @@ export default function SlugSessionPage() {
 
   const useVoice = interview.data.voiceEnabled;
 
-  const showPreviewTour = isPreview && !previewTourDone;
+  const showPreviewTour = isPreview && !previewTourDone && useVoice;
 
   if (showPreviewTour) {
     const mode = useVoice ? "voice" : "chat";

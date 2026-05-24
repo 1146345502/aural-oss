@@ -11,7 +11,7 @@ const MOVE_ON_PATTERN =
   /\b(next\s*question|move\s*on|skip\s*(this|it)?|next\s*one|let'?s\s*(move|continue)\s*(on|forward)?)\b/i;
 
 export async function POST(req: Request) {
-  const { sessionId, interviewId, messages, currentQuestionIndex } =
+  const { sessionId, interviewId, messages, currentQuestionIndex, manualNavigation } =
     await req.json();
 
   try {
@@ -31,12 +31,15 @@ export async function POST(req: Request) {
 
     const provider = getProvider(interview.llmProvider);
 
-    const conversationHistory: LLMMessage[] = messages.map(
-      (m: { role: "user" | "assistant"; content: string }) => ({
+    const conversationHistory: LLMMessage[] = (messages ?? [])
+      .filter(
+        (m: { role?: string; content?: string }) =>
+          typeof m.content === "string" && m.content.trim().length > 0,
+      )
+      .map((m: { role: "user" | "assistant"; content: string }) => ({
         role: m.role as "user" | "assistant",
-        content: m.content,
-      }),
-    );
+        content: m.content.trim(),
+      }));
 
     const promptMessages = buildInterviewerPrompt({
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -61,6 +64,10 @@ export async function POST(req: Request) {
       questionAdvanced = false;
     }
 
+    if (questionAdvanced && manualNavigation) {
+      questionAdvanced = false;
+    }
+
     const cleanContent = response.content
       .replace("[INTERVIEW_COMPLETE]", "")
       .replace("[NEXT_QUESTION]", "")
@@ -69,7 +76,12 @@ export async function POST(req: Request) {
     // Fallback: detect when the AI moved to the next question without the marker.
     // This catches the common case where the user says "next question" and the AI
     // transitions verbally but forgets [NEXT_QUESTION].
-    if (!questionAdvanced && !isComplete && conversationHistory.length > 0) {
+    if (
+      !manualNavigation &&
+      !questionAdvanced &&
+      !isComplete &&
+      conversationHistory.length > 0
+    ) {
       const lastUserMsg = [...conversationHistory]
         .reverse()
         .find((m) => m.role === "user");

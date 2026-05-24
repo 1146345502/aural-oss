@@ -6,31 +6,38 @@ import {
     type CodeEditorCanvasRef,
 } from "@/components/code-editor/code-editor-canvas";
 import { IntervieweeHelpPopover } from "@/components/session/interviewee-help-popover";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { ChatComposer } from "@/components/ui/chat-composer";
 import { Progress } from "@/components/ui/progress";
-import { Textarea } from "@/components/ui/textarea";
 import {
     WhiteboardCanvas,
     type WhiteboardCanvasRef,
 } from "@/components/whiteboard/whiteboard-canvas";
+import {
+    useChunkLoadRecovery,
+    useSessionToolChunkPrefetch,
+} from "@/hooks/use-chunk-load-recovery";
 import { useIsMobile } from "@/hooks/use-is-mobile";
+import { cn } from "@/lib/utils";
 import {
     Check,
-    ChevronDown,
-    ChevronLeft,
-    ChevronRight,
-    ChevronUp,
     Clock,
     Code2,
     FileText,
     Loader2,
     MessageCircle,
-    PenLine,
     Plus,
     Save,
-    Send,
-    X,
+    X
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -56,6 +63,13 @@ interface Interview {
   }[];
 }
 
+const aiGreetingRequested = new Set<string>();
+
+const CHAT_PREVIOUS_TRANSITION =
+  "[I'd like to go back to the previous question and add more to my answer.]";
+const CHAT_NEXT_TRANSITION =
+  "[I'd like to move on to the next question.]";
+
 export function ChatInterface({
   sessionId,
   interview,
@@ -70,10 +84,13 @@ export function ChatInterface({
   durationMinutes?: number;
   initialMessages?: Message[];
   initialQuestionIndex?: number;
-  onComplete: () => void;
+  onComplete: (reason?: string) => void;
   /** Render in static preview mode — shows full layout without API calls */
   preview?: boolean;
 }) {
+  useChunkLoadRecovery();
+  useSessionToolChunkPrefetch(!preview);
+
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
   const isMobile = useIsMobile();
@@ -81,13 +98,23 @@ export function ChatInterface({
   const [messages, setMessages] = useState<Message[]>(initialMessages ?? []);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [finishing, setFinishing] = useState(false);
   const [aiTyping, setAiTyping] = useState(false);
   const [currentQuestion, setCurrentQuestion] = useState(initialQuestionIndex ?? 0);
   const [whiteboardOpen, setWhiteboardOpen] = useState(false);
   const [codeEditorOpen, setCodeEditorOpen] = useState(false);
+  const [finishDialogOpen, setFinishDialogOpen] = useState(false);
   const [splitPercent, setSplitPercent] = useState(40);
+  const [toolSplitPercent, setToolSplitPercent] = useState(42);
+  const [problemChatSplitPercent, setProblemChatSplitPercent] = useState(48);
   const splitDragging = useRef(false);
+  const toolDragging = useRef(false);
+  const problemChatDragging = useRef(false);
   const splitContainerRef = useRef<HTMLDivElement>(null);
+  const toolSplitContainerRef = useRef<HTMLDivElement>(null);
+  const problemChatContainerRef = useRef<HTMLDivElement>(null);
+  /** Survives React Strict Mode remounts so we only request one opening greeting. */
+  const greetingStartedRef = useRef(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const whiteboardRef = useRef<WhiteboardCanvasRef>(null);
@@ -98,7 +125,6 @@ export function ChatInterface({
   const timerExpiredRef = useRef(false);
   const timerStartedRef = useRef(false);
   const initialMessageCount = useRef(initialMessages?.length ?? 0);
-  const greetingRequestedRef = useRef(false);
 
   useEffect(() => {
     if (timerStartedRef.current || !durationMinutes) return;
@@ -162,6 +188,7 @@ export function ChatInterface({
   activeSnippetIdxRef.current = activeSnippetIdx;
 
   useEffect(() => {
+    if (preview) return;
     const handleBeforeUnload = () => {
       // Save active whiteboard drawing
       const active = drawingsRef.current[activeDrawingIdxRef.current];
@@ -203,8 +230,10 @@ export function ChatInterface({
     };
 
     window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [sessionId]);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [sessionId, preview]);
 
   // ── Coding / Whiteboard question detection ─────────────────────
   const currentQ = interview.questions[currentQuestion];
@@ -232,6 +261,74 @@ export function ChatInterface({
     document.addEventListener("pointermove", onMouseMove);
     document.addEventListener("pointerup", onMouseUp);
   }, []);
+
+  const handleToolSplitMouseDown = useCallback((e: React.PointerEvent) => {
+    e.preventDefault();
+    const target = e.currentTarget as HTMLElement;
+    target.setPointerCapture?.(e.pointerId);
+    toolDragging.current = true;
+    const onMouseMove = (ev: PointerEvent) => {
+      if (!toolDragging.current || !toolSplitContainerRef.current) return;
+      const rect = toolSplitContainerRef.current.getBoundingClientRect();
+      const chatPct = ((ev.clientX - rect.left) / rect.width) * 100;
+      setToolSplitPercent(Math.min(Math.max(100 - chatPct, 28), 65));
+    };
+    const onMouseUp = () => {
+      toolDragging.current = false;
+      target.releasePointerCapture?.(e.pointerId);
+      document.removeEventListener("pointermove", onMouseMove);
+      document.removeEventListener("pointerup", onMouseUp);
+    };
+    document.addEventListener("pointermove", onMouseMove);
+    document.addEventListener("pointerup", onMouseUp);
+  }, []);
+
+  const handleProblemChatSplitMouseDown = useCallback((e: React.PointerEvent) => {
+    e.preventDefault();
+    const target = e.currentTarget as HTMLElement;
+    target.setPointerCapture?.(e.pointerId);
+    problemChatDragging.current = true;
+    const onMouseMove = (ev: PointerEvent) => {
+      if (!problemChatDragging.current || !problemChatContainerRef.current) return;
+      const rect = problemChatContainerRef.current.getBoundingClientRect();
+      const pct = ((ev.clientY - rect.top) / rect.height) * 100;
+      setProblemChatSplitPercent(Math.min(Math.max(pct, 22), 78));
+    };
+    const onMouseUp = () => {
+      problemChatDragging.current = false;
+      target.releasePointerCapture?.(e.pointerId);
+      document.removeEventListener("pointermove", onMouseMove);
+      document.removeEventListener("pointerup", onMouseUp);
+    };
+    document.addEventListener("pointermove", onMouseMove);
+    document.addEventListener("pointerup", onMouseUp);
+  }, []);
+
+  const toggleWhiteboard = useCallback(() => {
+    if (isCodingQuestion || isWhiteboardQuestion) {
+      setWhiteboardOpen(true);
+      setCodeEditorOpen(false);
+      return;
+    }
+    setWhiteboardOpen((prev) => {
+      const next = !prev;
+      if (next) setCodeEditorOpen(false);
+      return next;
+    });
+  }, [isCodingQuestion, isWhiteboardQuestion]);
+
+  const toggleCodeEditor = useCallback(() => {
+    if (isCodingQuestion || isWhiteboardQuestion) {
+      setCodeEditorOpen(true);
+      setWhiteboardOpen(false);
+      return;
+    }
+    setCodeEditorOpen((prev) => {
+      const next = !prev;
+      if (next) setWhiteboardOpen(false);
+      return next;
+    });
+  }, [isCodingQuestion, isWhiteboardQuestion]);
 
   // Auto-open editor and save/restore per-question content
   const prevQuestionRef = useRef(currentQuestion);
@@ -296,12 +393,16 @@ export function ChatInterface({
       }
     }
 
-    // ── Auto-open the appropriate editor ──
+    // ── Auto-open the appropriate editor (mutually exclusive) ──
     if (isCodingQuestion) {
       setCodeEditorOpen(true);
-    }
-    if (isWhiteboardQuestion) {
+      setWhiteboardOpen(false);
+    } else if (isWhiteboardQuestion) {
       setWhiteboardOpen(true);
+      setCodeEditorOpen(false);
+    } else if (questionChanged) {
+      setWhiteboardOpen(false);
+      setCodeEditorOpen(false);
     }
 
     // ── Load starter code for fresh coding questions ──
@@ -325,11 +426,11 @@ export function ChatInterface({
 
   // Initialize: get AI greeting (skip when resuming with existing messages)
   useEffect(() => {
-    if (greetingRequestedRef.current) return;
-    if (!initialMessages?.length) {
-      greetingRequestedRef.current = true;
-      getAIResponse([]);
-    }
+    if (preview || initialMessages?.length) return;
+    if (greetingStartedRef.current || aiGreetingRequested.has(sessionId)) return;
+    greetingStartedRef.current = true;
+    aiGreetingRequested.add(sessionId);
+    void getAIResponse([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -707,7 +808,11 @@ export function ChatInterface({
     setCodeSaveStatus("saved");
   }, [codeSnippets, activeSnippetIdx, persistCodeSnippet]);
 
-  async function getAIResponse(conversationHistory: Message[]) {
+  async function getAIResponse(
+    conversationHistory: Message[],
+    questionIndex = currentQuestion,
+    options?: { ignoreQuestionAdvance?: boolean },
+  ) {
     setAiTyping(true);
     try {
       const response = await fetch("/api/ai/chat", {
@@ -717,15 +822,25 @@ export function ChatInterface({
           sessionId,
           interviewId: interview.id,
           messages: conversationHistory.map((m) => ({
-            role: m.role === "USER" ? "user" : "assistant",
+            role:
+              m.role === "ASSISTANT"
+                ? "assistant"
+                : "user",
             content: m.content,
           })),
-          currentQuestionIndex: currentQuestion,
+          currentQuestionIndex: questionIndex,
+          manualNavigation: options?.ignoreQuestionAdvance ?? false,
         }),
       });
 
+      if (!response.ok) {
+        console.error("AI response error:", response.status);
+        return;
+      }
+
       const data = await response.json();
       const aiContent: string = data.content;
+      if (!aiContent?.trim()) return;
 
       const aiMessage: Message = {
         id: crypto.randomUUID(),
@@ -736,8 +851,7 @@ export function ChatInterface({
 
       setMessages((prev) => [...prev, aiMessage]);
 
-      // Advance question tracker only when AI explicitly moved to next question
-      if (data.questionAdvanced) {
+      if (!options?.ignoreQuestionAdvance && data.questionAdvanced) {
         setCurrentQuestion((prev) =>
           Math.min(prev + 1, interview.questions.length)
         );
@@ -779,33 +893,63 @@ export function ChatInterface({
     })();
   }, [remainingSeconds, saveAllDrawings, saveAllCodeSnippets, sessionId, onComplete]);
 
-  async function handlePreviousQuestion() {
-    if (currentQuestion <= 0 || sending || aiTyping) return;
+  const handleFinishInterview = useCallback(async () => {
+    if (preview || finishing) return;
+    setFinishing(true);
+    try {
+      await Promise.all([saveAllDrawings(), saveAllCodeSnippets()]);
+      await fetch(`/api/trpc/session.complete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ json: { id: sessionId } }),
+      });
+      setFinishDialogOpen(false);
+      onComplete();
+    } finally {
+      setFinishing(false);
+    }
+  }, [preview, finishing, saveAllDrawings, saveAllCodeSnippets, sessionId, onComplete]);
 
-    const prevIdx = currentQuestion - 1;
-    setCurrentQuestion(prevIdx);
+  async function handleQuestionTransition(direction: "next" | "previous") {
+    if (preview || sending || aiTyping) return;
 
-    // Persist the reverted question on the session for resume support
-    const prevQuestionId = interview.questions[prevIdx]?.id;
-    if (prevQuestionId) {
+    const targetIdx =
+      direction === "next" ? currentQuestion + 1 : currentQuestion - 1;
+    if (
+      targetIdx < 0 ||
+      targetIdx >= interview.questions.length ||
+      (direction === "next" && currentQuestion >= interview.questions.length - 1) ||
+      (direction === "previous" && currentQuestion <= 0)
+    ) {
+      return;
+    }
+
+    const targetQuestionId = interview.questions[targetIdx]?.id;
+    const transitionContent =
+      direction === "previous"
+        ? CHAT_PREVIOUS_TRANSITION
+        : CHAT_NEXT_TRANSITION;
+
+    setCurrentQuestion(targetIdx);
+
+    if (targetQuestionId) {
       fetch("/api/trpc/session.updateCurrentQuestion", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          json: { sessionId, questionId: prevQuestionId },
+          json: { sessionId, questionId: targetQuestionId },
         }),
       }).catch(() => {});
     }
 
-    // Add a system-style user message informing the AI
-    const revisionMsg: Message = {
+    const transitionMsg: Message = {
       id: crypto.randomUUID(),
-      role: "USER",
-      content: `[I'd like to go back to the previous question and add more to my answer.]`,
+      role: "SYSTEM",
+      content: transitionContent,
       timestamp: new Date().toISOString(),
     };
 
-    const updatedMessages = [...messages, revisionMsg];
+    const updatedMessages = [...messages, transitionMsg];
     setMessages(updatedMessages);
     setSending(true);
 
@@ -816,126 +960,29 @@ export function ChatInterface({
         body: JSON.stringify({
           json: {
             sessionId,
-            content: revisionMsg.content,
-            questionId: prevQuestionId,
+            content: transitionContent,
+            questionId: targetQuestionId,
+            internal: true,
           },
         }),
       });
 
-      // Get AI response with the reverted question index
-      setAiTyping(true);
-      const response = await fetch("/api/ai/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionId,
-          interviewId: interview.id,
-          messages: updatedMessages.map((m) => ({
-            role: m.role === "USER" ? "user" : "assistant",
-            content: m.content,
-          })),
-          currentQuestionIndex: prevIdx,
-        }),
+      await getAIResponse(updatedMessages, targetIdx, {
+        ignoreQuestionAdvance: true,
       });
-
-      const data = await response.json();
-      const aiMessage: Message = {
-        id: crypto.randomUUID(),
-        role: "ASSISTANT",
-        content: data.content,
-        timestamp: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, aiMessage]);
-
-      if (data.questionAdvanced) {
-        setCurrentQuestion((prev) =>
-          Math.min(prev + 1, interview.questions.length)
-        );
-      }
     } catch (error) {
-      console.error("Previous question error:", error);
+      console.error("Question transition error:", error);
     } finally {
       setSending(false);
-      setAiTyping(false);
     }
   }
 
-  async function handleNextQuestion() {
-    if (currentQuestion >= interview.questions.length - 1 || sending || aiTyping) return;
+  function handleNextQuestion() {
+    void handleQuestionTransition("next");
+  }
 
-    const nextIdx = currentQuestion + 1;
-    setCurrentQuestion(nextIdx);
-
-    const nextQuestionId = interview.questions[nextIdx]?.id;
-    if (nextQuestionId) {
-      fetch("/api/trpc/session.updateCurrentQuestion", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          json: { sessionId, questionId: nextQuestionId },
-        }),
-      }).catch(() => {});
-    }
-
-    const skipMsg: Message = {
-      id: crypto.randomUUID(),
-      role: "USER",
-      content: `[Moving to the next question.]`,
-      timestamp: new Date().toISOString(),
-    };
-
-    const updatedMessages = [...messages, skipMsg];
-    setMessages(updatedMessages);
-    setSending(true);
-
-    try {
-      await fetch("/api/trpc/session.sendMessage", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          json: {
-            sessionId,
-            content: skipMsg.content,
-            questionId: nextQuestionId,
-          },
-        }),
-      });
-
-      setAiTyping(true);
-      const response = await fetch("/api/ai/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionId,
-          interviewId: interview.id,
-          messages: updatedMessages.map((m) => ({
-            role: m.role === "USER" ? "user" : "assistant",
-            content: m.content,
-          })),
-          currentQuestionIndex: nextIdx,
-        }),
-      });
-
-      const data = await response.json();
-      const aiMessage: Message = {
-        id: crypto.randomUUID(),
-        role: "ASSISTANT",
-        content: data.content,
-        timestamp: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, aiMessage]);
-
-      if (data.questionAdvanced) {
-        setCurrentQuestion((prev) =>
-          Math.min(prev + 1, interview.questions.length)
-        );
-      }
-    } catch (error) {
-      console.error("Next question error:", error);
-    } finally {
-      setSending(false);
-      setAiTyping(false);
-    }
+  function handlePreviousQuestion() {
+    void handleQuestionTransition("previous");
   }
 
   async function handleSend() {
@@ -955,7 +1002,7 @@ export function ChatInterface({
 
     try {
       // Save user message to server
-      await fetch("/api/trpc/session.sendMessage", {
+      const sendRes = await fetch("/api/trpc/session.sendMessage", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -967,6 +1014,16 @@ export function ChatInterface({
         }),
       });
 
+      if (!sendRes.ok) {
+        const body = await sendRes.json().catch(() => ({}));
+        const errMsg = body?.error?.json?.message ?? body?.error?.message ?? "";
+        if (errMsg.includes("session time has been reached") || (body?.error?.json?.data?.code === "FORBIDDEN" && errMsg.includes("time"))) {
+          setSending(false);
+          onComplete("TIME_LIMIT_EXCEEDED");
+          return;
+        }
+      }
+
       // Get AI response
       await getAIResponse(updatedMessages);
     } finally {
@@ -974,13 +1031,6 @@ export function ChatInterface({
       inputRef.current?.focus();
     }
   }
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
 
   const progress =
     interview.questions.length > 0
@@ -1080,12 +1130,169 @@ export function ChatInterface({
     { id: "p-1", role: "ASSISTANT", content: `Hi! I'm ${interview.aiName}. Let's start — ${interview.questions[0]?.text ?? "tell me about yourself."}`, timestamp: "" },
     { id: "p-2", role: "USER", content: "Sure, I have been working as a software engineer for...", timestamp: "" },
   ] : [];
-  const displayMessages = preview ? previewMessages : messages;
+  const displayMessages = (preview ? previewMessages : messages).filter(
+    (m) => m.role !== "SYSTEM",
+  );
+
+  const composerQuestionNav = {
+    onPrevious: handlePreviousQuestion,
+    onNext: handleNextQuestion,
+    canPrevious: currentQuestion > 0,
+    canNext: currentQuestion < interview.questions.length - 1,
+    disabled: sending || aiTyping || preview || finishing,
+  };
+
+  const composerSessionTools = {
+    whiteboardOpen,
+    onToggleWhiteboard: toggleWhiteboard,
+    codeOpen: codeEditorOpen,
+    onToggleCode: toggleCodeEditor,
+    disabled: sending || aiTyping || preview || finishing,
+  };
+
+  const composerSessionActions = {
+    onFinish: () => setFinishDialogOpen(true),
+    finishDisabled: sending || aiTyping || preview,
+    finishLoading: finishing,
+  };
+
+  const composerTimer =
+    remainingSeconds !== null ? (
+      <div
+        className={cn(
+          "flex items-center gap-1.5 px-1 text-xs font-medium tabular-nums",
+          isTimeLow ? "text-destructive" : "text-muted-foreground",
+        )}
+      >
+        <Clock className="h-3.5 w-3.5" />
+        <span>{formatTime(remainingSeconds)} left</span>
+      </div>
+    ) : null;
+
+  const renderSessionHeader = (fullWidth = false) => (
+    <div className="shrink-0 border-b bg-card py-2 md:py-3">
+      <div
+        className={cn(
+          fullWidth ? "px-3 md:px-6" : "mx-auto w-full max-w-3xl px-4",
+        )}
+      >
+        <div className="flex items-center justify-between">
+          <div className="mr-2 min-w-0 flex-1">
+            <h1 className="truncate text-sm font-semibold md:text-base">
+              {interview.title}
+            </h1>
+            <p className="hidden text-xs text-muted-foreground md:block">
+              Chat Interview with {interview.aiName}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <IntervieweeHelpPopover mode="chat" />
+          </div>
+        </div>
+        <div
+          className="mt-2 flex items-center gap-3"
+          data-tour="chat-progress"
+        >
+          <Progress value={progress} className="h-1.5 flex-1" />
+          <span className="shrink-0 text-xs font-medium text-muted-foreground">
+            Q{Math.min(currentQuestion + 1, interview.questions.length)} /{" "}
+            {interview.questions.length}
+          </span>
+        </div>
+        {currentQ?.text && (
+          <p className="mt-1.5 line-clamp-1 text-xs text-muted-foreground">
+            {currentQ.text}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+
+  const renderFinishDialog = () => (
+    <AlertDialog open={finishDialogOpen} onOpenChange={setFinishDialogOpen}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Finish interview?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Your responses will be saved and submitted. You won&apos;t be able to
+            continue this session afterward.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={finishing}>Keep going</AlertDialogCancel>
+          <AlertDialogAction
+            disabled={finishing}
+            onClick={(event) => {
+              event.preventDefault();
+              void handleFinishInterview();
+            }}
+          >
+            {finishing ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Saving...
+              </>
+            ) : (
+              "Finish interview"
+            )}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+
+  const renderFloatingComposer = (compact = false) => (
+    <div
+      data-tour="chat-input"
+      className={cn(
+        "pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-background via-background/95 to-transparent",
+        compact ? "px-2 pb-2 pt-6" : "px-4 pb-4 pt-10",
+      )}
+    >
+      <div
+        className={cn(
+          "pointer-events-auto",
+          compact ? "" : "mx-auto max-w-3xl",
+        )}
+      >
+        <ChatComposer
+          value={input}
+          onChange={setInput}
+          onSubmit={() => void handleSend()}
+          onStop={() => {
+            setSending(false);
+            setAiTyping(false);
+          }}
+          isGenerating={sending || aiTyping}
+          disabled={preview}
+          submitDisabled={preview || !input.trim()}
+          placeholder="Type your response..."
+          compact={compact}
+          textareaRef={inputRef}
+          questionNav={composerQuestionNav}
+          sessionTools={composerSessionTools}
+          sessionActions={composerSessionActions}
+          footerLeft={composerTimer}
+          className="border bg-card/95 shadow-lg backdrop-blur-sm"
+        />
+      </div>
+    </div>
+  );
 
   /** Messages list (shared between normal and coding layouts) */
   const renderMessages = (compact = false) => (
-    <div data-tour="chat-question" className={compact ? "flex-1 overflow-y-auto code-scrollbar" : "flex-1 overflow-y-auto code-scrollbar"} ref={scrollRef}>
-      <div className={compact ? "space-y-3 p-3" : "mx-auto max-w-3xl space-y-4 p-4"}>
+    <div
+      data-tour="chat-question"
+      className="flex-1 overflow-y-auto code-scrollbar"
+      ref={scrollRef}
+    >
+      <div
+        className={
+          compact
+            ? "space-y-3 p-3 pb-28"
+            : "mx-auto max-w-3xl space-y-4 p-4 pb-36"
+        }
+      >
         {displayMessages.map((msg) => (
           <div
             key={msg.id}
@@ -1102,7 +1309,7 @@ export function ChatInterface({
             </div>
           </div>
         ))}
-        {aiTyping && (
+        {(aiTyping || sending) && (
           <div className="flex justify-start">
             <div className="rounded-2xl bg-muted px-4 py-3">
               <div className="flex gap-1">
@@ -1117,196 +1324,14 @@ export function ChatInterface({
     </div>
   );
 
-  /** Input bar (shared between layouts) */
-  const renderInput = (compact = false) => (
-    <div data-tour="chat-input" className={`border-t bg-card ${compact ? "p-2" : "p-4"}`}>
-      <div className={`flex items-end gap-2 ${compact ? "" : "mx-auto max-w-3xl"}`}>
-        <Textarea
-          ref={inputRef}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Type your response..."
-          className={`${compact ? "min-h-[36px] max-h-20 text-xs" : "min-h-[44px] max-h-32"} resize-none`}
-          rows={1}
-          disabled={preview || sending || aiTyping}
-        />
-        <Button
-          size="icon"
-          className={compact ? "h-9 w-9 shrink-0" : ""}
-          onClick={handleSend}
-          disabled={preview || !input.trim() || sending || aiTyping}
-        >
-          {sending ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Send className="h-4 w-4" />
-          )}
-        </Button>
-      </div>
-    </div>
-  );
-
   // ── CODING / WHITEBOARD question: split layout with problem panel ──
   if (isCodingQuestion || isWhiteboardQuestion) {
+    const rightPanelIsWhiteboard = whiteboardOpen;
+
     return (
       <div className="flex h-screen flex-col bg-background">
-        {/* Compact header */}
-        <div className="flex items-center justify-between border-b bg-card px-3 py-2 md:px-4">
-          <div className="mr-2 flex min-w-0 items-center gap-2 md:gap-3">
-            <h1 className="truncate text-sm font-semibold">{interview.title}</h1>
-            <Badge variant="outline" className="shrink-0 text-xs">
-              Q{Math.min(currentQuestion + 1, interview.questions.length)}/{interview.questions.length}
-            </Badge>
-          </div>
-          <div className="flex items-center gap-1 md:gap-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 w-7 p-0"
-              onClick={handlePreviousQuestion}
-              disabled={currentQuestion <= 0 || sending || aiTyping}
-              title="Return to previous question"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            {isCodingQuestion ? (
-              <Button
-                variant={whiteboardOpen ? "default" : "outline"}
-                size="sm"
-                className="h-7 text-xs"
-                onClick={() => setWhiteboardOpen((prev) => !prev)}
-              >
-                <PenLine className="h-3 w-3 md:mr-1" />
-                <span className="hidden md:inline">Whiteboard</span>
-              </Button>
-            ) : (
-              <Button
-                variant={codeEditorOpen ? "default" : "outline"}
-                size="sm"
-                className="h-7 text-xs"
-                onClick={() => setCodeEditorOpen((prev) => !prev)}
-              >
-                <Code2 className="h-3 w-3 md:mr-1" />
-                <span className="hidden md:inline">Code</span>
-              </Button>
-            )}
-            <Progress value={progress} className="hidden h-1 w-20 md:block" />
-          </div>
-        </div>
-
-        {/* Whiteboard panel — collapsible (for coding questions) */}
-        {isCodingQuestion && whiteboardOpen && (
-          <div className="border-b bg-card px-4 py-3">
-            <div className="mx-auto max-w-4xl">
-              <div className="mb-2 flex items-center gap-1">
-                {drawings.map((d, i) => (
-                  <div
-                    key={d.id}
-                    className={`group flex items-center gap-0.5 rounded-md text-xs font-medium transition-colors ${
-                      i === activeDrawingIdx
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-muted/50 text-muted-foreground hover:bg-muted"
-                    }`}
-                  >
-                    {editingDrawingId === d.id ? (
-                      <input
-                        autoFocus
-                        defaultValue={d.label}
-                        className="w-20 rounded bg-transparent px-2 py-1 text-xs outline-none ring-1 ring-primary"
-                        onBlur={(e) => renameDrawing(d.id, e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") renameDrawing(d.id, e.currentTarget.value);
-                          if (e.key === "Escape") setEditingDrawingId(null);
-                        }}
-                      />
-                    ) : (
-                      <button
-                        className="px-2.5 py-1"
-                        onClick={() => switchDrawing(i)}
-                        onDoubleClick={() => setEditingDrawingId(d.id)}
-                        title="Double-click to rename"
-                      >
-                        {d.label}
-                      </button>
-                    )}
-                    {drawings.length > 1 && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); deleteDrawing(i); }}
-                        className={`mr-0.5 rounded p-0.5 opacity-0 transition-opacity group-hover:opacity-100 ${
-                          i === activeDrawingIdx
-                            ? "hover:bg-primary-foreground/20"
-                            : "hover:bg-muted-foreground/20"
-                        }`}
-                        title="Delete drawing"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    )}
-                  </div>
-                ))}
-                <button
-                  onClick={addNewDrawing}
-                  className="flex items-center gap-0.5 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted"
-                  title="New drawing"
-                >
-                  <Plus className="h-3 w-3" />
-                  New
-                </button>
-                <div className="ml-auto">
-                  <button
-                    onClick={handleManualSave}
-                    disabled={saveStatus === "saving"}
-                    className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
-                      saveStatus === "saved"
-                        ? "text-secondary-600 dark:text-secondary-400"
-                        : "text-muted-foreground hover:bg-muted"
-                    }`}
-                    title="Save drawing"
-                  >
-                    {saveStatus === "saving" ? (
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                    ) : saveStatus === "saved" ? (
-                      <Check className="h-3 w-3" />
-                    ) : (
-                      <Save className="h-3 w-3" />
-                    )}
-                    {saveStatus === "saved" ? "Saved" : "Save"}
-                  </button>
-                </div>
-              </div>
-              <div className="h-[400px]">
-                <WhiteboardCanvas
-                  ref={whiteboardRef}
-                  fillParent
-                  dark={isDark}
-                  onAutoSave={handleWhiteboardAutoSave}
-                  autoSaveInterval={5000}
-                  onDirty={handleWhiteboardDirty}
-                />
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Code editor panel — collapsible (for whiteboard questions) */}
-        {isWhiteboardQuestion && codeEditorOpen && (
-          <div className="border-b bg-card px-4 py-3">
-            <div className="mx-auto max-w-4xl">
-              {renderCodeSnippetTabs()}
-              <div className="h-[300px]">
-                <CodeEditorCanvas
-                  ref={codeEditorRef}
-                  fillParent
-                  dark={isDark}
-                  onAutoSave={handleCodeAutoSave}
-                  autoSaveInterval={5000}
-                  onDirty={handleCodeDirty}
-                />
-              </div>
-            </div>
-          </div>
-        )}
+        {renderSessionHeader(true)}
+        {renderFinishDialog()}
 
         {/* Split view: side-by-side on desktop, stacked on mobile */}
         <div ref={splitContainerRef} className={isMobile ? "flex flex-1 flex-col overflow-hidden" : "flex flex-1 overflow-hidden"}>
@@ -1315,38 +1340,52 @@ export function ChatInterface({
             className={`flex min-w-0 shrink-0 flex-col overflow-x-hidden ${isMobile ? "max-h-[45vh] border-b" : ""}`}
             style={isMobile ? undefined : { width: `${splitPercent}%`, minWidth: 260 }}
           >
-            {/* Question description */}
-            <div className="flex-1 overflow-y-auto border-b p-4 code-scrollbar">
-              <div className="mb-3 flex items-center gap-2">
-                <FileText className="h-4 w-4 text-muted-foreground" />
-                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Problem
-                </span>
-              </div>
-              <h2 className="mb-3 text-base font-semibold leading-snug">{currentQ?.text}</h2>
-              {currentQ?.description && (
-                <p className="mb-3 text-sm text-muted-foreground whitespace-pre-wrap">{currentQ.description}</p>
-              )}
-              {isCodingQuestion && currentQ?.starterCode?.code && (
-                <div className="overflow-hidden rounded-md border bg-zinc-950">
-                  <div className="flex items-center gap-1.5 border-b border-zinc-800 bg-zinc-900 px-3 py-1.5">
-                    <Code2 className="h-3 w-3 text-zinc-400" />
-                    <span className="text-[10px] font-medium uppercase tracking-wide text-zinc-400">
-                      Starter Code — {currentQ.starterCode.language}
-                    </span>
-                  </div>
-                  <CodeBlock code={currentQ.starterCode.code} language={currentQ.starterCode.language} className="max-h-48" />
+            <div
+              ref={problemChatContainerRef}
+              className="flex min-h-0 flex-1 flex-col"
+            >
+              {/* Question description */}
+              <div
+                className="min-h-0 overflow-y-auto p-4 code-scrollbar"
+                style={{ flex: `0 0 ${problemChatSplitPercent}%` }}
+              >
+                <div className="mb-3 flex items-center gap-2">
+                  <FileText className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Problem
+                  </span>
                 </div>
-              )}
-            </div>
-            {/* Chat panel — compact below the question */}
-            <div className="flex max-h-[40%] flex-col">
-              <div className="flex items-center gap-1.5 border-b bg-card px-3 py-1.5">
-                <MessageCircle className="h-3 w-3 text-muted-foreground" />
-                <span className="text-xs font-medium text-muted-foreground">Chat</span>
+                <h2 className="mb-3 text-base font-semibold leading-snug">{currentQ?.text}</h2>
+                {currentQ?.description && (
+                  <p className="mb-3 whitespace-pre-wrap text-sm text-muted-foreground">{currentQ.description}</p>
+                )}
+                {isCodingQuestion && currentQ?.starterCode?.code && (
+                  <div className="overflow-hidden rounded-md border bg-zinc-950">
+                    <div className="flex items-center gap-1.5 border-b border-zinc-800 bg-zinc-900 px-3 py-1.5">
+                      <Code2 className="h-3 w-3 text-zinc-400" />
+                      <span className="text-[10px] font-medium uppercase tracking-wide text-zinc-400">
+                        Starter Code — {currentQ.starterCode.language}
+                      </span>
+                    </div>
+                    <CodeBlock code={currentQ.starterCode.code} language={currentQ.starterCode.language} className="max-h-48" />
+                  </div>
+                )}
               </div>
-              {renderMessages(true)}
-              {renderInput(true)}
+
+              <div
+                className="group flex h-1 shrink-0 cursor-row-resize touch-none items-center justify-center border-y border-border bg-muted/30 transition-colors hover:bg-primary/10 active:bg-primary/20"
+                onPointerDown={handleProblemChatSplitMouseDown}
+              />
+
+              {/* Chat panel */}
+              <div className="relative flex min-h-0 flex-1 flex-col">
+                <div className="flex items-center gap-1.5 border-b bg-card px-3 py-1.5">
+                  <MessageCircle className="h-3 w-3 text-muted-foreground" />
+                  <span className="text-xs font-medium text-muted-foreground">Chat</span>
+                </div>
+                {renderMessages(true)}
+                {renderFloatingComposer(true)}
+              </div>
             </div>
           </div>
 
@@ -1358,9 +1397,9 @@ export function ChatInterface({
             />
           )}
 
-          {/* Right panel — code editor (coding) or whiteboard (whiteboard) */}
+          {/* Right panel — code editor or whiteboard (mutually exclusive) */}
           <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-            {isCodingQuestion ? (
+            {!rightPanelIsWhiteboard ? (
               <>
                 {renderCodeSnippetTabs()}
                 <div className="flex-1">
@@ -1375,7 +1414,6 @@ export function ChatInterface({
                 </div>
               </>
             ) : (
-              /* Whiteboard as the primary right panel */
               <div className="flex flex-1 flex-col">
                 <div className="flex items-center gap-1 border-b bg-card px-2 py-1">
                   {drawings.map((d, i) => (
@@ -1472,204 +1510,151 @@ export function ChatInterface({
   }
 
   // ── Normal (non-coding) layout ────────────────────────────────
+  const toolPanelOpen = whiteboardOpen || codeEditorOpen;
+
   return (
     <div className="flex h-screen flex-col bg-background">
-      {/* Header */}
-      <div className="border-b bg-card px-3 py-2 md:px-4 md:py-3">
-        <div className="mx-auto flex max-w-3xl items-center justify-between">
-          <div className="mr-2 min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <h1 className="truncate text-sm font-semibold md:text-base">{interview.title}</h1>
-              {remainingSeconds !== null && (
-                <div className={`flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium tabular-nums ${isTimeLow ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground"}`}>
-                  <Clock className="h-3 w-3" />
-                  <span>{formatTime(remainingSeconds)}</span>
-                </div>
+      {renderSessionHeader(toolPanelOpen)}
+      {renderFinishDialog()}
+
+      {/* Messages + floating composer (+ optional tool side panel) */}
+      <div
+        ref={toolSplitContainerRef}
+        className={cn(
+          "flex min-h-0 flex-1 overflow-hidden",
+          isMobile && (whiteboardOpen || codeEditorOpen) && "flex-col",
+        )}
+      >
+        <div className="relative flex min-w-0 flex-1 flex-col">
+          {renderMessages()}
+          {renderFloatingComposer()}
+        </div>
+
+        {(whiteboardOpen || codeEditorOpen) && (
+          <>
+            {!isMobile ? (
+              <div
+                className="group flex w-1 shrink-0 cursor-col-resize touch-none items-center justify-center border-l border-r border-border bg-muted/30 transition-colors hover:bg-primary/10 active:bg-primary/20"
+                onPointerDown={handleToolSplitMouseDown}
+              />
+            ) : (
+              <div className="h-px shrink-0 bg-border" />
+            )}
+            <div
+              className={cn(
+                "flex min-h-0 min-w-0 flex-col overflow-hidden bg-card",
+                isMobile ? "h-[45vh] border-t" : "shrink-0 border-l",
+              )}
+              style={isMobile ? undefined : { width: `${toolSplitPercent}%`, minWidth: 280 }}
+            >
+              {whiteboardOpen ? (
+                <>
+                  <div className="flex items-center gap-1 border-b px-2 py-1">
+                    {drawings.map((d, i) => (
+                      <div
+                        key={d.id}
+                        className={`group flex items-center gap-0.5 rounded-md text-xs font-medium transition-colors ${
+                          i === activeDrawingIdx
+                            ? "bg-primary text-primary-foreground"
+                            : "bg-muted/50 text-muted-foreground hover:bg-muted"
+                        }`}
+                      >
+                        {editingDrawingId === d.id ? (
+                          <input
+                            autoFocus
+                            defaultValue={d.label}
+                            className="w-20 rounded bg-transparent px-2 py-1 text-xs outline-none ring-1 ring-primary"
+                            onBlur={(e) => renameDrawing(d.id, e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") renameDrawing(d.id, e.currentTarget.value);
+                              if (e.key === "Escape") setEditingDrawingId(null);
+                            }}
+                          />
+                        ) : (
+                          <button
+                            className="px-2.5 py-1"
+                            onClick={() => switchDrawing(i)}
+                            onDoubleClick={() => setEditingDrawingId(d.id)}
+                            title="Double-click to rename"
+                          >
+                            {d.label}
+                          </button>
+                        )}
+                        {drawings.length > 1 && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); deleteDrawing(i); }}
+                            className={`mr-0.5 rounded p-0.5 opacity-0 transition-opacity group-hover:opacity-100 ${
+                              i === activeDrawingIdx
+                                ? "hover:bg-primary-foreground/20"
+                                : "hover:bg-muted-foreground/20"
+                            }`}
+                            title="Delete drawing"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    <button
+                      onClick={addNewDrawing}
+                      className="flex items-center gap-0.5 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted"
+                      title="New drawing"
+                    >
+                      <Plus className="h-3 w-3" />
+                      New
+                    </button>
+                    <div className="ml-auto">
+                      <button
+                        onClick={handleManualSave}
+                        disabled={saveStatus === "saving"}
+                        className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                          saveStatus === "saved"
+                            ? "text-secondary-600 dark:text-secondary-400"
+                            : "text-muted-foreground hover:bg-muted"
+                        }`}
+                        title="Save drawing"
+                      >
+                        {saveStatus === "saving" ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : saveStatus === "saved" ? (
+                          <Check className="h-3 w-3" />
+                        ) : (
+                          <Save className="h-3 w-3" />
+                        )}
+                        {saveStatus === "saved" ? "Saved" : "Save"}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="min-h-0 flex-1">
+                    <WhiteboardCanvas
+                      ref={whiteboardRef}
+                      fillParent
+                      dark={isDark}
+                      onAutoSave={handleWhiteboardAutoSave}
+                      autoSaveInterval={5000}
+                      onDirty={handleWhiteboardDirty}
+                    />
+                  </div>
+                </>
+              ) : (
+                <>
+                  {renderCodeSnippetTabs()}
+                  <div className="min-h-0 flex-1">
+                    <CodeEditorCanvas
+                      ref={codeEditorRef}
+                      fillParent
+                      dark={isDark}
+                      onAutoSave={handleCodeAutoSave}
+                      autoSaveInterval={5000}
+                      onDirty={handleCodeDirty}
+                    />
+                  </div>
+                </>
               )}
             </div>
-            <p className="hidden text-xs text-muted-foreground md:block">
-              Interviewer: {interview.aiName}
-            </p>
-          </div>
-          <div data-tour="chat-timer" className="flex items-center gap-1 md:gap-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 w-7 p-0"
-              onClick={handlePreviousQuestion}
-              disabled={currentQuestion <= 0 || sending || aiTyping}
-              title="Return to previous question"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 w-7 p-0"
-              onClick={handleNextQuestion}
-              disabled={currentQuestion >= interview.questions.length - 1 || sending || aiTyping}
-              title="Skip to next question"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-            <Badge variant="outline" className="shrink-0">
-              Q{Math.min(currentQuestion + 1, interview.questions.length)}/{interview.questions.length}
-            </Badge>
-            <div data-tour="chat-tools" className="flex items-center gap-1 md:gap-2">
-              <Button
-                variant={whiteboardOpen ? "default" : "outline"}
-                size="sm"
-                onClick={() => setWhiteboardOpen((prev) => !prev)}
-              >
-                <PenLine className="h-3 w-3 md:mr-1" />
-                <span className="hidden md:inline">Whiteboard</span>
-                {whiteboardOpen ? (
-                  <ChevronUp className="ml-0.5 h-3 w-3 md:ml-1" />
-                ) : (
-                  <ChevronDown className="ml-0.5 h-3 w-3 md:ml-1" />
-                )}
-              </Button>
-              <Button
-                variant={codeEditorOpen ? "default" : "outline"}
-                size="sm"
-                onClick={() => setCodeEditorOpen((prev) => !prev)}
-              >
-                <Code2 className="h-3 w-3 md:mr-1" />
-                <span className="hidden md:inline">Code</span>
-                {codeEditorOpen ? (
-                  <ChevronUp className="ml-0.5 h-3 w-3 md:ml-1" />
-                ) : (
-                  <ChevronDown className="ml-0.5 h-3 w-3 md:ml-1" />
-                )}
-              </Button>
-            </div>
-            <IntervieweeHelpPopover mode="chat" />
-          </div>
-        </div>
-        <div data-tour="chat-progress" className="mx-auto mt-2 max-w-3xl">
-          <Progress value={progress} className="h-1" />
-        </div>
+          </>
+        )}
       </div>
-
-      {/* Whiteboard panel — collapsible */}
-      {whiteboardOpen && (
-        <div className="border-b bg-card px-4 py-3">
-          <div className="mx-auto max-w-4xl">
-            {/* Drawing tabs */}
-            <div className="mb-2 flex items-center gap-1">
-              {drawings.map((d, i) => (
-                <div
-                  key={d.id}
-                  className={`group flex items-center gap-0.5 rounded-md text-xs font-medium transition-colors ${
-                    i === activeDrawingIdx
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted/50 text-muted-foreground hover:bg-muted"
-                  }`}
-                >
-                  {editingDrawingId === d.id ? (
-                    <input
-                      autoFocus
-                      defaultValue={d.label}
-                      className="w-20 rounded bg-transparent px-2 py-1 text-xs outline-none ring-1 ring-primary"
-                      onBlur={(e) => renameDrawing(d.id, e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") renameDrawing(d.id, e.currentTarget.value);
-                        if (e.key === "Escape") setEditingDrawingId(null);
-                      }}
-                    />
-                  ) : (
-                    <button
-                      className="px-2.5 py-1"
-                      onClick={() => switchDrawing(i)}
-                      onDoubleClick={() => setEditingDrawingId(d.id)}
-                      title="Double-click to rename"
-                    >
-                      {d.label}
-                    </button>
-                  )}
-                  {drawings.length > 1 && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); deleteDrawing(i); }}
-                      className={`mr-0.5 rounded p-0.5 opacity-0 transition-opacity group-hover:opacity-100 ${
-                        i === activeDrawingIdx
-                          ? "hover:bg-primary-foreground/20"
-                          : "hover:bg-muted-foreground/20"
-                      }`}
-                      title="Delete drawing"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  )}
-                </div>
-              ))}
-              <button
-                onClick={addNewDrawing}
-                className="flex items-center gap-0.5 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted"
-                title="New drawing"
-              >
-                <Plus className="h-3 w-3" />
-                New
-              </button>
-              <div className="ml-auto">
-                <button
-                  onClick={handleManualSave}
-                  disabled={saveStatus === "saving"}
-                  className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
-                    saveStatus === "saved"
-                      ? "text-secondary-600 dark:text-secondary-400"
-                      : "text-muted-foreground hover:bg-muted"
-                  }`}
-                  title="Save drawing"
-                >
-                  {saveStatus === "saving" ? (
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                  ) : saveStatus === "saved" ? (
-                    <Check className="h-3 w-3" />
-                  ) : (
-                    <Save className="h-3 w-3" />
-                  )}
-                  {saveStatus === "saved" ? "Saved" : "Save"}
-                </button>
-              </div>
-            </div>
-            <div className="h-[400px]">
-              <WhiteboardCanvas
-                ref={whiteboardRef}
-                fillParent
-                dark={isDark}
-                onAutoSave={handleWhiteboardAutoSave}
-                autoSaveInterval={5000}
-                onDirty={handleWhiteboardDirty}
-              />
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Code editor panel — collapsible */}
-      {codeEditorOpen && !isCodingQuestion && (
-        <div className="border-b bg-card px-4 py-3">
-          <div className="mx-auto max-w-4xl">
-            {renderCodeSnippetTabs()}
-            <div className="h-[400px]">
-              <CodeEditorCanvas
-                ref={codeEditorRef}
-                fillParent
-                dark={isDark}
-                onAutoSave={handleCodeAutoSave}
-                autoSaveInterval={5000}
-                onDirty={handleCodeDirty}
-              />
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Messages */}
-      {renderMessages()}
-
-      {/* Input */}
-      {renderInput()}
     </div>
   );
 }

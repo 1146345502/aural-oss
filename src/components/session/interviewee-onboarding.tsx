@@ -22,13 +22,13 @@ import {
     setScreenSkipped,
     setStoredScreenStream,
 } from "@/lib/media-stream-store";
-import {
-  buildRelayTargets,
-  isRecoverableRelayErrorMessage,
-  RelayConnector,
-  resolveRelayPrimaryPreference,
-} from "@/lib/voice/relay-routing";
 import { cn } from "@/lib/utils";
+import {
+    buildRelayTargets,
+    isRecoverableRelayErrorMessage,
+    RelayConnector,
+    resolveRelayPrimaryPreference,
+} from "@/lib/voice/relay-routing";
 import {
     AlertCircle,
     AudioLines,
@@ -43,7 +43,6 @@ import {
     User,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChatInterface } from "./chat-interface";
 import { IntervieweeTourOverlay } from "./interviewee-tour-overlay";
 import { IntervieweeTourProvider, useIntervieweeTour } from "./interviewee-tour-provider";
 import { VoiceInterface } from "./voice-interface";
@@ -1332,7 +1331,10 @@ export function IntervieweeOnboarding({
   }
 
   if (step === "howItWorks") {
-    const mode = voiceEnabled ? "voice" : "chat";
+    if (!voiceEnabled) {
+      handleComplete();
+      return null;
+    }
 
     const mockContext: InterviewContext = {
       title: interviewTitle,
@@ -1348,40 +1350,20 @@ export function IntervieweeOnboarding({
     };
 
     return (
-      <IntervieweeTourProvider mode={mode}>
+      <IntervieweeTourProvider mode="voice">
         <PreviewWrapper onReady={handleComplete}>
-          {mode === "voice" ? (
-            <VoiceInterface
-              sessionId="__preview__"
-              interviewId="__preview__"
-              interviewTitle={interviewTitle}
-              aiName={aiName ?? "AI Interviewer"}
-              questionCount={questionCount}
-              interviewContext={mockContext}
-              durationMinutes={timeLimitMinutes ?? undefined}
-              chatEnabled={chatEnabled}
-              onComplete={() => {}}
-              preview
-            />
-          ) : (
-            <ChatInterface
-              sessionId="__preview__"
-              interview={{
-                id: "__preview__",
-                title: interviewTitle,
-                aiName: aiName ?? "AI Interviewer",
-                mode: "CHAT",
-                questions: mockContext.questions.map((q, i) => ({
-                  id: `preview-q-${i}`,
-                  text: q.text,
-                  type: q.type,
-                })),
-              }}
-              durationMinutes={timeLimitMinutes ?? undefined}
-              onComplete={() => {}}
-              preview
-            />
-          )}
+          <VoiceInterface
+            sessionId="__preview__"
+            interviewId="__preview__"
+            interviewTitle={interviewTitle}
+            aiName={aiName ?? "AI Interviewer"}
+            questionCount={questionCount}
+            interviewContext={mockContext}
+            durationMinutes={timeLimitMinutes ?? undefined}
+            chatEnabled={chatEnabled}
+            onComplete={() => {}}
+            preview
+          />
         </PreviewWrapper>
         <IntervieweeTourOverlay />
       </IntervieweeTourProvider>
@@ -1401,7 +1383,13 @@ export function IntervieweeOnboarding({
           <Button variant="outline" onClick={() => setStep("info")}>
             Back
           </Button>
-          <Button disabled={!allChecksDone} onClick={() => setStep("howItWorks")}>
+          <Button
+            disabled={!allChecksDone}
+            onClick={() => {
+              if (voiceEnabled) setStep("howItWorks");
+              else onComplete();
+            }}
+          >
             Next
           </Button>
         </div>
