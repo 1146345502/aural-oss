@@ -81,7 +81,7 @@ function resolveBlobDuration(blob: Blob): Promise<number | undefined> {
  * Audio mixing strategy:
  *   - A single AudioContext drives a MediaStreamAudioDestinationNode.
  *   - The mic MediaStream is piped in via createMediaStreamSource.
- *   - TTS PCM chunks (float32 @ 24 kHz) are decoded into AudioBuffers
+ *   - TTS PCM chunks (int16 @ 24 kHz) are decoded into AudioBuffers
  *     and played into the same destination via BufferSourceNodes.
  *   - MediaRecorder records the destination's combined stream as webm/opus.
  */
@@ -178,7 +178,7 @@ export function useInterviewRecording({
   }, []);
 
   /**
-   * Feed a TTS PCM chunk (float32 @ 24 kHz) into the recording mixer.
+   * Feed a TTS PCM chunk (int16 @ 24 kHz) into the recording mixer.
    * Chunks are scheduled sequentially to avoid overlapping audio.
    */
   const addTtsChunk = useCallback((pcmData: ArrayBuffer) => {
@@ -186,7 +186,11 @@ export function useInterviewRecording({
     const dest = mixDestRef.current;
     if (!ctx || !dest || pcmData.byteLength === 0) return;
 
-    const float32 = new Float32Array(pcmData);
+    const int16 = new Int16Array(pcmData);
+    const float32 = new Float32Array(int16.length);
+    for (let i = 0; i < int16.length; i++) {
+      float32[i] = int16[i] / 32768;
+    }
     const sampleRate = 24000;
     const audioBuffer = ctx.createBuffer(1, float32.length, sampleRate);
     audioBuffer.copyToChannel(float32, 0);

@@ -10,6 +10,7 @@
  *   - SERVER_ACK (0b1011) message type
  *   - No app.appid/token/cluster in JSON; uses model_name in request
  */
+import { randomUUID } from "crypto";
 import { gunzipSync, gzipSync } from "zlib";
 
 const PROTOCOL_VERSION = 0b0001;
@@ -47,22 +48,39 @@ export interface BigModelAsrConfig {
   vadSegmentDuration?: number;
   endWindowSize?: number;
   forceToSpeechTime?: number;
+  enableNonstream?: boolean;
+  ssdVersion?: string;
+  corpus?: Record<string, unknown>;
+}
+
+export function resolveBigModelAsrLanguage(language?: string): string | undefined {
+  const normalized = language?.trim().toLowerCase();
+  if (!normalized) return undefined;
+  if (normalized.startsWith("english") || normalized === "en" || normalized.startsWith("en-")) {
+    return "en-US";
+  }
+  return undefined;
 }
 
 export function buildBigModelHeaders(
   appId: string,
   accessToken: string,
   reqid: string,
-  sourceType: "duration" | "concurrent" = "duration",
+  resourceId?: string,
+  apiKey?: string,
 ): Record<string, string> {
-  return {
-    "X-Api-Resource-Id": sourceType === "duration"
-      ? "volc.bigasr.sauc.duration"
-      : "volc.bigasr.sauc.concurrent",
-    "X-Api-Access-Key": accessToken,
-    "X-Api-App-Key": appId,
+  const headers: Record<string, string> = {
+    "X-Api-Resource-Id": resourceId || "volc.bigasr.sauc.duration",
     "X-Api-Request-Id": reqid,
+    "X-Api-Connect-Id": randomUUID(),
   };
+  if (apiKey) {
+    headers["X-Api-Key"] = apiKey;
+  } else {
+    headers["X-Api-Access-Key"] = accessToken;
+    headers["X-Api-App-Key"] = appId;
+  }
+  return headers;
 }
 
 function buildHeader(
@@ -82,26 +100,35 @@ function buildHeader(
 export function buildBigModelFullRequest(config: BigModelAsrConfig, uid: string): Buffer {
   const header = buildHeader(CLIENT_FULL_REQUEST, FLAG_POS_SEQ, SERIAL_JSON, COMP_GZIP);
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const request: Record<string, any> = {
+    model_name: config.modelName || "bigmodel",
+    enable_itn: config.enableItn ?? false,
+    enable_punc: config.enablePunc ?? true,
+    enable_ddc: config.enableDdc ?? false,
+    show_utterance: config.showUtterance ?? true,
+    result_type: config.resultType || "single",
+    vad_segment_duration: config.vadSegmentDuration ?? 3000,
+    end_window_size: config.endWindowSize ?? 500,
+    force_to_speech_time: config.forceToSpeechTime ?? 1000,
+  };
+  if (config.enableNonstream) request.enable_nonstream = true;
+  if (config.ssdVersion) request.ssd_version = config.ssdVersion;
+  if (config.corpus) request.corpus = config.corpus;
+
+  const audio: Record<string, unknown> = {
+    format: config.format || "pcm",
+    rate: config.rate || 16000,
+    bits: config.bits || 16,
+    channels: config.channels || 1,
+    codec: config.codec || "raw",
+  };
+  if (config.language) audio.language = config.language;
+
   const payload = {
     user: { uid },
-    audio: {
-      format: config.format || "pcm",
-      rate: config.rate || 16000,
-      bits: config.bits || 16,
-      channels: config.channels || 1,
-      codec: config.codec || "raw",
-    },
-    request: {
-      model_name: config.modelName || "bigmodel",
-      enable_itn: config.enableItn ?? false,
-      enable_punc: config.enablePunc ?? true,
-      enable_ddc: config.enableDdc ?? false,
-      show_utterance: config.showUtterance ?? true,
-      result_type: config.resultType || "single",
-      vad_segment_duration: config.vadSegmentDuration ?? 3000,
-      end_window_size: config.endWindowSize ?? 500,
-      force_to_speech_time: config.forceToSpeechTime ?? 1000,
-    },
+    audio,
+    request,
   };
 
   const compressed = gzipSync(Buffer.from(JSON.stringify(payload)));

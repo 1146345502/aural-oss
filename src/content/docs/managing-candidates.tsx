@@ -31,7 +31,7 @@ export const managingCandidatesArticles: DocArticle[] = [
             <DocImage src="/images/docs/import-excel.webp" alt="Import Sessions dialog with template download link and file upload area" />
           </DocStep>
           <DocStep step={3} title="Import by Resumes">
-            <p>Upload PDF resumes and let AI extract candidate information automatically. Each resume costs 5 AI tokens.</p>
+            <p>Upload PDF resumes and let AI extract candidate information automatically using your configured LLM provider.</p>
             <DocImage src="/images/docs/import-resumes.webp" alt="Import by Resumes dialog with uploaded PDF files and Parse resumes button" />
           </DocStep>
         </DocSteps>

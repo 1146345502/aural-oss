@@ -107,8 +107,8 @@ export const gettingStartedArticles: DocArticle[] = [
           Organization-level pages are accessible from the sidebar:
         </p>
         <ul>
-          <li><strong>Usage</strong> — Monitor AI tokens, session hours, and template usage</li>
-          <li><strong>Usage</strong> — Monitor your resource consumption</li>
+          <li><strong>Project Settings</strong> — Manage project defaults and workspace configuration</li>
+          <li><strong>Support</strong> — Find help resources and troubleshooting guidance</li>
         </ul>
 
         <h3>Switching Projects</h3>

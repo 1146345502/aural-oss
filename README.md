@@ -66,13 +66,19 @@
     <td width="25%" align="center"><strong>🛡 Anti-Cheating</strong><br/><sub>Tab monitoring, paste blocking, multi-screen detection, integrity logs</sub></td>
     <td width="25%" align="center"><strong>👥 Team Management</strong><br/><sub>Organizations, projects, and role-based access control</sub></td>
     <td width="25%" align="center"><strong>🌐 Multilingual</strong><br/><sub>English and Chinese with pluggable locale system</sub></td>
-    <td width="25%" align="center"><strong>🔌 Pluggable LLMs</strong><br/><sub>OpenAI, Moonshot Kimi, MiniMax — or any OpenAI-compatible API</sub></td>
+    <td width="25%" align="center"><strong>🔌 Pluggable LLMs</strong><br/><sub>OpenAI, Gemini, Moonshot Kimi, MiniMax — or any OpenAI-compatible API</sub></td>
   </tr>
   <tr>
     <td width="25%" align="center"><strong>🚀 Quick Start Templates</strong><br/><sub>Pre-built interview templates for technical, behavioral, research, and more</sub></td>
+    <td width="25%" align="center"><strong>🗣 Practice Interviews</strong><br/><sub>Voice-first rehearsal with context, AI feedback, suggested answers, and score tracking</sub></td>
     <td width="25%" align="center"><strong>🔗 Share & Preview</strong><br/><sub>Share interviews with a link and preview as a candidate before going live</sub></td>
     <td width="25%" align="center"><strong>🔑 Developer API</strong><br/><sub>Full REST API with OpenAPI spec for programmatic interview management</sub></td>
+  </tr>
+  <tr>
     <td width="25%" align="center"><strong>📈 Activity Tracking</strong><br/><sub>Session activity segments and multi-segment audio recordings</sub></td>
+    <td width="25%" align="center"></td>
+    <td width="25%" align="center"></td>
+    <td width="25%" align="center"></td>
   </tr>
 </table>
 
@@ -124,6 +130,18 @@ Fine-tune interview settings — AI personality, tone, follow-up depth, language
 
 <p align="center">
   <img src="public/images/docs/interview-edit-settings.webp" alt="Interview settings — shareable link, general settings, and AI configuration" width="720" style="border: 1px solid #e1e4e8; border-radius: 8px;" />
+</p>
+
+### Practice Before Interviews
+
+Turn any existing interview into a focused practice workspace. Add role context, rehearse by voice, get streamed coaching feedback after every answer, generate suggested answers from the JD/resume context, and track practice runs separately from real candidate sessions.
+
+<p align="center">
+  <img src="public/images/docs/practices-context.webp" alt="Practice context drawer with company, role, job description, and resume notes" width="720" style="border: 1px solid #e1e4e8; border-radius: 8px;" />
+</p>
+
+<p align="center">
+  <img src="public/images/docs/practices-session.webp" alt="Focused practice mode with AI feedback and suggested answer panel" width="720" style="border: 1px solid #e1e4e8; border-radius: 8px;" />
 </p>
 
 ### Invite Candidates
@@ -249,7 +267,7 @@ Track all your interviews, sessions, and candidates from a unified dashboard. Or
 | Language | TypeScript |
 | Database | [Supabase](https://supabase.com/) (PostgreSQL + Auth + Storage + RLS) |
 | API | [tRPC](https://trpc.io/) |
-| AI / LLM | OpenAI, Moonshot Kimi, MiniMax — pluggable provider system |
+| AI / LLM | OpenAI, Google Gemini, Moonshot Kimi, MiniMax — pluggable provider system |
 | Voice | WebSocket relay servers (Volcengine Doubao, Azure OpenAI Realtime) |
 | UI | [Tailwind CSS](https://tailwindcss.com/) + [shadcn/ui](https://ui.shadcn.com/) + [Radix](https://radix-ui.com/) |
 | Code Editor | [Monaco Editor](https://microsoft.github.io/monaco-editor/) |
@@ -288,7 +306,8 @@ Track all your interviews, sessions, and candidates from a unified dashboard. Or
 │  │ AI Provider      │  │
 │  │ Registry         │  │
 │  │ ┌──────────────┐ │  │
-│  │ │OpenAI│Kimi│MM│ │  │
+│  │ │OAI Gemini    │ │  │
+│  │ │Kimi MiniMax  │ │  │
 │  │ └──────────────┘ │  │
 │  └──────────────────┘  │
 └────────────┬───────────┘
@@ -308,12 +327,13 @@ Track all your interviews, sessions, and candidates from a unified dashboard. Or
 
 | Module | Location | Responsibility |
 |--------|----------|----------------|
-| **App Router** | `src/app/` | Pages and layouts organized into route groups: `(auth)` for login/register, `(dashboard)` for the main app, `(docs)` for documentation, and `i/` for public interview links. |
+| **App Router** | `src/app/` | Pages and layouts organized into route groups: `(auth)` for login/register, `(dashboard)` for the main app, `(docs)` for documentation, `i/` for public interview links, and `practice/` for practice sessions. |
 | **tRPC Routers** | `src/server/routers/` | Typed API layer handling interviews, sessions, analysis, organizations, projects, candidates, and access control. |
-| **REST API Routes** | `src/app/api/` | Endpoints for AI operations (chat, generate, refine, summarize), voice token/save, auth, session lifecycle (complete/leave), and file uploads. |
+| **REST API Routes** | `src/app/api/` | Endpoints for AI operations (chat, generate, refine, summarize), practice feedback/hints/follow-ups, voice token/save/TTS, auth, session lifecycle (complete/leave), and file uploads. |
 | **Developer API (v1)** | `src/app/api/v1/` | Full REST API for programmatic interview management — CRUD for interviews, questions, sessions, candidates, publish, and usage. Authenticated via `dlv_` API keys with rate limiting. OpenAPI 3.1 spec at `/api/v1/openapi.json`. |
 | **AI Provider Registry** | `src/lib/ai/` | Pluggable LLM system with a provider registry, per-task model selection, and prompt templates for interviewing, generation, and report summarization. |
 | **Voice Relay** | `server/` | Standalone WebSocket servers that proxy audio between the browser and speech-to-speech APIs (Volcengine Doubao or Azure OpenAI Realtime). |
+| **Practice / Prep Module** | `src/app/(dashboard)/practices/`, `src/app/practice/`, `src/components/prep/`, `src/lib/prep/`, `src/server/routers/prep.ts` | Interview practice workspace with JD/resume context, voice or text answers, streamed feedback, suggested answers, follow-up coaching, practice attempt history, and resumable sessions. |
 | **Components** | `src/components/` | React components split by domain — `session/` (chat/voice/video UI, anti-cheating), `interview/` (builder, question cards), `auth/`, `layout/`, and `ui/` (shadcn primitives). |
 | **Supabase Layer** | `src/lib/supabase/` | Client/server/admin helpers for database access, auth, and storage. Row-Level Security enforces data isolation per user and organization. |
 
@@ -342,8 +362,8 @@ Run Aural on your own servers for full control over data, configuration, and cus
 
 - **Node.js** 18+ and npm
 - **Supabase** project (cloud or local via `supabase start`)
-- **LLM API key** — at least one of: OpenAI, Kimi (Moonshot), or MiniMax
-- **Voice relay credentials** — Volcengine Doubao (primary) or Azure OpenAI (backup)
+- **LLM API key** — at least one of: OpenAI, Google Gemini, Kimi (Moonshot), or MiniMax
+- **Voice relay credentials** — Volcengine Doubao (primary) or Azure OpenAI (backup), if you want voice interviews or voice practice
 
 #### 1. Clone and Install
 
@@ -390,7 +410,8 @@ cp .env.example .env.local
 Edit `.env.local` with your credentials. At minimum you need:
 
 - Supabase URL and keys
-- One LLM provider API key (OpenAI recommended)
+- One LLM provider API key (`OPENAI_API_KEY` recommended for the main app; `GEMINI_API_KEY` recommended for relay summarization and fallback generation)
+- Voice credentials only if you want voice interviews or voice practice (`DOUBAO_*` for the recommended relay, or `AZURE_OPENAI_*` for the backup relay)
 
 **Local Supabase key mapping** — map the keys from `supabase status` output to your `.env.local`:
 
@@ -425,20 +446,23 @@ aural/
 ├── src/
 │   ├── app/                # Next.js App Router pages and API routes
 │   │   ├── (auth)/         # Login, register, password reset
-│   │   ├── (dashboard)/    # Dashboard, interviews, projects, settings
+│   │   ├── (dashboard)/    # Dashboard, interviews, practices, projects, settings
 │   │   ├── (docs)/         # Documentation pages
-│   │   ├── api/            # API routes (AI, auth, voice, session, etc.)
+│   │   ├── api/            # API routes (AI, auth, prep, voice, session, etc.)
 │   │   │   └── v1/         # Developer REST API (interviews, sessions, etc.)
-│   │   └── i/              # Public interview and invite links
+│   │   ├── i/              # Public interview and invite links
+│   │   └── practice/       # Public practice preview/session routes
 │   ├── components/         # React components
 │   │   ├── auth/           # Auth forms
 │   │   ├── interview/      # Interview builder, question cards
+│   │   ├── prep/           # Practice context, feedback, hints, and voice input
 │   │   ├── session/        # Voice/chat interface, anti-cheating
 │   │   ├── layout/         # Header, sidebar
 │   │   └── ui/             # shadcn/ui primitives
 │   ├── hooks/              # Custom React hooks
 │   ├── lib/                # Shared utilities
 │   │   ├── ai/             # LLM provider registry and implementations
+│   │   ├── prep/           # Practice scoring, audio, feedback, and resume state helpers
 │   │   ├── supabase/       # Supabase client/server/admin helpers
 │   │   ├── voice/          # Voice relay types and utilities
 │   │   ├── api-key-auth.ts # Developer API key validation
@@ -452,17 +476,33 @@ aural/
 └── public/                 # Static assets
 ```
 
+## Practice / Prep Module
+
+The practice module lets interview authors and candidates rehearse against an interview without creating real candidate sessions. It is intentionally part of the OSS app and does not depend on private billing or usage-control infrastructure.
+
+| Area | Location | Notes |
+|------|----------|-------|
+| Dashboard list | `src/app/(dashboard)/practices/` | Cross-interview practice history and quick access. |
+| Interview tab | `src/app/(dashboard)/interviews/[id]/edit/prep/` | Per-interview Practices tab with stats, filters, context, and launch controls. |
+| Practice session | `src/app/(dashboard)/interviews/[id]/prep/`, `src/app/practice/[id]/` | Text or voice rehearsal flow with resumable attempts. |
+| UI components | `src/components/prep/` | Context drawer, answer cards, streamed feedback, suggested answers, follow-ups, and voice input. |
+| API layer | `src/server/routers/prep.ts`, `src/app/api/prep/` | tRPC data mutations plus streaming feedback, follow-up, hint, and leave endpoints. |
+| Data model | `supabase/migrations/004_interview_prep.sql` | Adds interview context fields plus `prep_sessions` and `prep_attempts` tables with RLS. |
+
+Practice feedback uses the same LLM provider chain as interview generation. Voice practice also uses the voice relay and Doubao TTS settings from `.env.local`; answer audio is stored in the existing private `recordings` bucket.
+
 ---
 
 ## AI Provider System
 
-Aural uses a pluggable LLM provider architecture. You need **at least one** provider configured. The system auto-selects the first available provider in this order: OpenAI > Kimi > MiniMax.
+Aural uses a pluggable LLM provider architecture. You need **at least one** provider configured. The system auto-selects the first available provider in this order: OpenAI > Gemini > Kimi > MiniMax.
 
 ### Providers
 
 | Provider | Env Variable | Default Model | Get API Key |
 |----------|-------------|---------------|-------------|
 | **OpenAI** (recommended) | `OPENAI_API_KEY` | `gpt-4o-mini` | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
+| Google Gemini | `GEMINI_API_KEY` | `gemini-3.1-flash-lite` | [aistudio.google.com](https://aistudio.google.com/) |
 | Moonshot Kimi | `KIMI_API_KEY` | `moonshot-v1-8k` | [platform.moonshot.cn](https://platform.moonshot.cn/) |
 | MiniMax | `MINIMAX_API_KEY` | `MiniMax-Text-01` | [platform.minimaxi.com](https://platform.minimaxi.com/) |
 
@@ -470,16 +510,17 @@ You can also use any OpenAI-compatible API (e.g., local models via Ollama or Lit
 
 ### How LLMs Are Used
 
-Aural uses LLMs for four distinct tasks, each selecting the best available model:
+Aural uses LLMs for several distinct tasks, each selecting the best available model:
 
-| Task | What It Does | OpenAI Model | Kimi Model | MiniMax Model |
-|------|-------------|-------------|-----------|--------------|
-| **Chat interviewing** | Powers the AI interviewer during live sessions — asks questions, generates follow-ups, adapts tone | `gpt-4o-mini` | `moonshot-v1-8k` | `MiniMax-Text-01` |
-| **Interview generation** | Generates a complete interview (questions, criteria, settings) from a plain-language description | `gpt-4o-mini` | `moonshot-v1-8k` | `MiniMax-M2.1-lightning` |
-| **Question refinement** | Improves or refines existing interview questions based on feedback | `gpt-4o-mini` | `moonshot-v1-8k` | `MiniMax-M2.1-lightning` |
-| **Report & analysis** | Generates post-interview reports with per-question scores, highlights, and improvement areas | `gpt-4o` | `kimi-k2.5` | `MiniMax-M2.1-lightning` |
+| Task | What It Does | OpenAI Model | Gemini Model | Kimi Model | MiniMax Model |
+|------|-------------|-------------|--------------|-----------|--------------|
+| **Chat interviewing** | Powers the AI interviewer during live sessions — asks questions, generates follow-ups, adapts tone | `gpt-4o-mini` | `gemini-3.1-flash-lite` | `moonshot-v1-8k` | `MiniMax-Text-01` |
+| **Interview generation** | Generates a complete interview (questions, criteria, settings) from a plain-language description | `gpt-4o-mini` | `gemini-3.1-flash-lite` | `moonshot-v1-8k` | `MiniMax-M2.1-lightning` |
+| **Question refinement** | Improves or refines existing interview questions based on feedback | `gpt-4o-mini` | `gemini-3.1-flash-lite` | `moonshot-v1-8k` | `MiniMax-M2.1-lightning` |
+| **Practice coaching** | Scores practice answers, streams feedback, generates follow-up coaching, and suggests improved answers | `gpt-4o-mini` | `gemini-3.1-flash-lite` | `moonshot-v1-8k` | `MiniMax-M2.1-lightning` |
+| **Report & analysis** | Generates post-interview reports with per-question scores, highlights, and improvement areas | `gpt-4o` | `gemini-3.1-flash-lite` | `kimi-k2.5` | `MiniMax-M2.1-lightning` |
 
-Report generation uses a higher-capability model because it requires synthesizing an entire conversation into structured analysis. Chat interviewing uses each provider's default model unless overridden per-interview in the settings.
+Report generation uses a higher-capability model when OpenAI or Kimi is configured because it requires synthesizing an entire conversation into structured analysis. Chat interviewing uses each provider's default model unless overridden per-interview in the settings. Interview generation and practice coaching use a fallback chain, so configuring more than one provider improves resilience.
 
 ---
 
@@ -494,22 +535,32 @@ Aural supports real-time AI voice interviews via WebSocket relay servers. Two re
 The recommended voice relay for production use. It provides full-featured Speech-to-Speech capabilities with per-question interview flow, LLM-powered context summarization, native Chinese language support, and automatic server-side reconnection (up to 3 retry attempts with backoff) for resilient voice sessions.
 
 ```bash
-npm run dev:voice          # starts on port 8081
+npm run dev:voice          # starts on port 8766
 ```
 
-**Required env vars:** `DOUBAO_APP_ID`, `DOUBAO_ACCESS_TOKEN`, `DOUBAO_SECRET_KEY`, `DOUBAO_APP_KEY`, `DOUBAO_RESOURCE_ID`
+**Required env vars:** either `DOUBAO_APP_ID` + `DOUBAO_ACCESS_TOKEN`, or `DOUBAO_API_KEY`.
+
+**Recommended supporting env vars:**
+
+- `GEMINI_API_KEY` for the relay LLM default (`gemini-3.1-flash-lite`)
+- `RELAY_LLM_PROVIDER=gemini`
+- `RELAY_LLM_MODEL=gemini-3.1-flash-lite`
+- `NEXT_PUBLIC_VOICE_RELAY_PRIMARY=voice`
+- `DOUBAO_ASR_RESOURCE_ID=volc.seedasr.sauc.duration`
+- `DOUBAO_TTS_RESOURCE_ID=seed-tts-2.0`
+- `DOUBAO_TTS_PCM_SAMPLE_LAYOUT=int16le`
 
 ### Backup: Azure OpenAI Realtime (`server/openai-voice-relay.ts`)
 
-An alternative relay using Azure OpenAI's Realtime API (`gpt-4o-realtime-preview`). Use this when Volcengine credentials are unavailable or for English-only deployments. Note that the OpenAI relay may have higher latency and less natural conversational flow compared to Volcengine.
+An alternative relay using Azure OpenAI's Realtime API (`gpt-realtime-1.5` by default). Use this when Volcengine credentials are unavailable or for English-only deployments. Note that the OpenAI relay may have higher latency and less natural conversational flow compared to Volcengine.
 
 ```bash
-npm run dev:openai-voice   # starts on port 8082
+npm run dev:openai-voice   # starts on port 8767
 ```
 
 **Required env vars:** `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_DEPLOYMENT`
 
-> **Tip:** You can run both relays simultaneously. The frontend selects the appropriate relay based on the interview's language configuration.
+> **Tip:** You can run both relays simultaneously. The frontend uses `NEXT_PUBLIC_VOICE_RELAY_PRIMARY` to choose the first relay and automatically falls back to the alternate relay if the primary cannot connect.
 
 ---
 
@@ -580,6 +631,7 @@ curl -X POST http://localhost:3000/api/v1/interviews/{id}/publish \
 | `npm run start` | Start production server |
 | `npm run lint` | Run ESLint |
 | `npm run test:web` | Run web tests |
+| `npm run test:functional` | Run Playwright-backed functional browser tests |
 | `npm run dev:voice` | Start primary voice relay (Volcengine Doubao) |
 | `npm run dev:openai-voice` | Start backup voice relay (Azure OpenAI) |
 | `npm run db:types` | Regenerate Supabase TypeScript types |

@@ -49,6 +49,8 @@ interface RelayConnectorOptions<TJsonMessage extends Record<string, unknown>> {
   buildInitMessage: () => unknown;
   createSocket?: (url: string) => RelaySocketLike;
   readyTimeoutMs?: number;
+  reconnectAttempts?: number;
+  reconnectDelayMs?: number;
   binaryType?: string;
   onJsonMessage: (
     message: TJsonMessage,
@@ -59,6 +61,7 @@ interface RelayConnectorOptions<TJsonMessage extends Record<string, unknown>> {
     context: RelayMessageContext<TJsonMessage>
   ) => void;
   onConnected?: (context: RelayConnectedContext) => void;
+  onReconnecting?: (attempt: number, maxAttempts: number, target: RelayTarget) => void;
   onFailover?: (context: RelayFailoverContext) => void;
   onPermanentFailure?: (error: Error) => void;
 }
@@ -238,10 +241,13 @@ export class RelayConnector<TJsonMessage extends Record<string, unknown>> {
   private readonly buildInitMessage: () => unknown;
   private readonly createSocket: (url: string) => RelaySocketLike;
   private readonly readyTimeoutMs: number;
+  private readonly reconnectAttempts: number;
+  private readonly reconnectDelayMs: number;
   private readonly binaryType?: string;
   private readonly onJsonMessage: RelayConnectorOptions<TJsonMessage>["onJsonMessage"];
   private readonly onBinaryMessage: RelayConnectorOptions<TJsonMessage>["onBinaryMessage"];
   private readonly onConnected?: RelayConnectorOptions<TJsonMessage>["onConnected"];
+  private readonly onReconnecting?: RelayConnectorOptions<TJsonMessage>["onReconnecting"];
   private readonly onFailover?: RelayConnectorOptions<TJsonMessage>["onFailover"];
   private readonly onPermanentFailure?: RelayConnectorOptions<TJsonMessage>["onPermanentFailure"];
 
@@ -260,10 +266,13 @@ export class RelayConnector<TJsonMessage extends Record<string, unknown>> {
       options.createSocket ||
       ((url: string) => new WebSocket(url) as unknown as RelaySocketLike);
     this.readyTimeoutMs = options.readyTimeoutMs ?? 10_000;
+    this.reconnectAttempts = options.reconnectAttempts ?? 2;
+    this.reconnectDelayMs = options.reconnectDelayMs ?? 1500;
     this.binaryType = options.binaryType;
     this.onJsonMessage = options.onJsonMessage;
     this.onBinaryMessage = options.onBinaryMessage;
     this.onConnected = options.onConnected;
+    this.onReconnecting = options.onReconnecting;
     this.onFailover = options.onFailover;
     this.onPermanentFailure = options.onPermanentFailure;
   }
@@ -289,15 +298,13 @@ export class RelayConnector<TJsonMessage extends Record<string, unknown>> {
   }
 
   async failover(reason: string): Promise<RelayTarget | null> {
-    if (this.destroyed || this.targets.length < 2 || this.currentIndex < 0) {
+    if (this.destroyed || this.currentIndex < 0) {
       return null;
     }
     if (this.failoverPromise) return this.failoverPromise;
 
     const from = this.currentTarget;
-    const candidateIndices = this.targets
-      .map((_, index) => index)
-      .filter((index) => index !== this.currentIndex);
+    const disconnectedIndex = this.currentIndex;
 
     this.ready = false;
     const activeSocket = this.socket;
@@ -310,16 +317,61 @@ export class RelayConnector<TJsonMessage extends Record<string, unknown>> {
       }
     }
 
-    this.failoverPromise = this.connectCandidates(
-      candidateIndices,
-      true,
-      from ?? undefined,
-      reason
+    this.failoverPromise = this.reconnectThenFailover(
+      disconnectedIndex,
+      from,
+      reason,
     ).finally(() => {
       this.failoverPromise = null;
     });
 
     return this.failoverPromise;
+  }
+
+  /** Try reconnecting to the same target first; only failover to
+   *  alternatives if all reconnect attempts are exhausted. */
+  private async reconnectThenFailover(
+    disconnectedIndex: number,
+    from: RelayTarget | null,
+    reason: string,
+  ): Promise<RelayTarget> {
+    // Attempt reconnection to the same target
+    for (let attempt = 1; attempt <= this.reconnectAttempts; attempt++) {
+      if (this.destroyed) break;
+
+      const delay = this.reconnectDelayMs * attempt;
+      this.onReconnecting?.(attempt, this.reconnectAttempts, this.targets[disconnectedIndex]);
+      await new Promise((r) => setTimeout(r, delay));
+
+      if (this.destroyed) break;
+
+      try {
+        const target = await this.connectCandidate(disconnectedIndex, false);
+        return target;
+      } catch {
+        // retry
+      }
+    }
+
+    // All reconnect attempts exhausted — fall through to alternative targets
+    if (this.destroyed) throw new Error("Connector destroyed during reconnect");
+
+    if (this.targets.length < 2) {
+      const err = new Error("Voice relay reconnect failed — no alternative targets");
+      this.onPermanentFailure?.(err);
+      throw err;
+    }
+
+    const candidateIndices = this.targets
+      .map((_, index) => index)
+      .filter((index) => index !== disconnectedIndex);
+
+    return this.connectCandidates(
+      candidateIndices,
+      true,
+      from ?? undefined,
+      reason
+    );
   }
 
   sendJson(payload: unknown): boolean {

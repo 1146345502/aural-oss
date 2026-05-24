@@ -1,0 +1,3 @@
+-- Local development seed file.
+-- Keep empty by default; auth users and personal organizations are created by
+-- the on_auth_user_created trigger in 001_initial_schema.sql.

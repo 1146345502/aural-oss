@@ -2,6 +2,11 @@
 
 import { createLogger } from "@/lib/logger";
 import {
+  cleanPeriodArtifacts,
+  mergeAsrFinal,
+  mergeClientAsrInterim,
+} from "@/lib/voice/asr-interim";
+import {
   buildRelayTargets,
   isRecoverableRelayErrorMessage,
   RelayConnector,
@@ -16,6 +21,8 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 
 const log = createLogger("voice");
+const ASR_PROCESSING_ACTIVE_SPEECH_HOLD_MS = 1_600;
+const ASR_PROCESSING_AUDIO_ACTIVITY_RMS_THRESHOLD = 0.018;
 
 export interface InterviewContext {
   title: string;
@@ -80,7 +87,7 @@ interface TrackedMessage {
  * 3. Browser captures mic audio as 16kHz int16 PCM
  * 4. Audio sent to relay server via WebSocket (hex-encoded)
  * 5. Relay forwards to Volcengine S2S which handles ASR + LLM + TTS
- * 6. TTS audio (24kHz float32 PCM) streamed back and played via AudioContext
+ * 6. TTS audio (24kHz int16 PCM) streamed back and played via AudioContext
  * 7. Per-question transitions managed by relay with LLM summarization
  * 8. On disconnect, all messages are saved to database
  */
@@ -138,6 +145,7 @@ export function useVoice({
 
   // Buffers for accumulating streaming chunks
   const asrBufferRef = useRef<string>("");
+  const lastMicActivityAtRef = useRef(0);
   const chatBufferRef = useRef<string>("");
   const lastOnAIResponseRef = useRef<string>("");
   const currentQuestionIndexRef = useRef(
@@ -147,10 +155,16 @@ export function useVoice({
     null
   );
   const latestWhiteboardUpdateRef = useRef<string | null>(null);
+  const stateRef = useRef(state);
+  const asrProcessingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     currentQuestionIndexRef.current = state.currentQuestionIndex;
   }, [state.currentQuestionIndex]);
+
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -160,7 +174,52 @@ export function useVoice({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const clearAsrProcessingTimer = useCallback(() => {
+    if (asrProcessingTimerRef.current) {
+      clearTimeout(asrProcessingTimerRef.current);
+      asrProcessingTimerRef.current = null;
+    }
+  }, []);
+
+  const startAsrProcessingTimer = useCallback(
+    (pendingText: string) => {
+      clearAsrProcessingTimer();
+      const trimmed = pendingText.trim();
+      if (!trimmed) return;
+
+      const elapsedSinceMicActivity =
+        performance.now() - lastMicActivityAtRef.current;
+      const delay = Math.max(
+        250,
+        ASR_PROCESSING_ACTIVE_SPEECH_HOLD_MS - elapsedSinceMicActivity,
+      );
+
+      asrProcessingTimerRef.current = setTimeout(() => {
+        asrProcessingTimerRef.current = null;
+        const current = stateRef.current;
+        if (
+          !current.isConnected ||
+          current.isSpeaking ||
+          current.isTransitioning ||
+          performance.now() - lastMicActivityAtRef.current <
+            ASR_PROCESSING_ACTIVE_SPEECH_HOLD_MS
+        ) {
+          startAsrProcessingTimer(trimmed);
+          return;
+        }
+
+        setState((s) => ({
+          ...s,
+          aiTranscript: "",
+          isProcessing: true,
+        }));
+      }, delay);
+    },
+    [clearAsrProcessingTimer],
+  );
+
   const cleanup = useCallback(() => {
+    clearAsrProcessingTimer();
     stopListening();
     interruptPlayback();
     relayConnectorRef.current?.close();
@@ -180,7 +239,7 @@ export function useVoice({
       lastAssistantUtteranceEndedAt: 0,
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [clearAsrProcessingTimer]);
 
   const clearPlaybackFlushTimer = useCallback(() => {
     if (playbackFlushTimerRef.current) {
@@ -299,13 +358,18 @@ export function useVoice({
     };
   }, [clearPlaybackFlushTimer, scheduleQueuedAudioFlush]);
 
-  /** Queue incoming float32 PCM audio chunk and flush through a small jitter buffer. */
+  /** Queue incoming int16 PCM audio chunk and flush through a small jitter buffer. */
   const playAudio = useCallback(
     (pcmData: ArrayBuffer) => {
       const ctx = audioContextRef.current;
       if (!ctx) return;
 
-      const float32 = new Float32Array(pcmData);
+      const int16 = new Int16Array(pcmData);
+      if (int16.length === 0) return;
+      const float32 = new Float32Array(int16.length);
+      for (let i = 0; i < int16.length; i++) {
+        float32[i] = int16[i] / 32768;
+      }
       if (float32.length === 0) return;
 
       if (firstQueuedAudioAtRef.current === null) {
@@ -481,13 +545,10 @@ export function useVoice({
           break;
 
         case "interrupt":
+          clearAsrProcessingTimer();
           interruptPlayback();
-          setState((s) => ({ ...s, isProcessing: false }));
-          if (chatBufferRef.current.trim()) {
-            const text = chatBufferRef.current.trim();
-            setState((s) => ({ ...s, aiTranscript: text }));
-            chatBufferRef.current = "";
-          }
+          chatBufferRef.current = "";
+          setState((s) => ({ ...s, aiTranscript: "" }));
           break;
 
         case "asr": {
@@ -497,17 +558,47 @@ export function useVoice({
           if (results.length > 0) {
             const text = (results[0].text as string) || "";
             if (text.trim()) {
-              asrBufferRef.current = text.trim();
-              setState((s) => ({ ...s, userTranscript: text }));
-              onTranscript?.(text, false);
+              clearAsrProcessingTimer();
+              const merged = mergeClientAsrInterim(asrBufferRef.current, text);
+              asrBufferRef.current = merged;
+              const cleaned = cleanPeriodArtifacts(merged);
+              const display = cleaned.replace(/\s+$/, "").replace(/[.!?。！？]+$/, "");
+              setState((s) => ({ ...s, isProcessing: false, userTranscript: display }));
+              onTranscript?.(display, false);
+            }
+          }
+          break;
+        }
+
+        case "asr_pending": {
+          const text =
+            typeof msg.text === "string" && msg.text.trim()
+              ? msg.text.trim()
+              : asrBufferRef.current;
+          if (text.trim()) {
+            const merged = mergeClientAsrInterim(asrBufferRef.current, text);
+            asrBufferRef.current = merged;
+            startAsrProcessingTimer(merged);
+            if (!stateRef.current.isProcessing) {
+              const cleaned = cleanPeriodArtifacts(merged);
+              const display = cleaned.replace(/\s+$/, "").replace(/[.!?。！？]+$/, "");
+              setState((s) => ({ ...s, userTranscript: display }));
+              onTranscript?.(display, false);
             }
           }
           break;
         }
 
         case "asr_ended": {
-          const finalText =
-            (typeof msg.text === "string" && msg.text.trim()) || asrBufferRef.current;
+          clearAsrProcessingTimer();
+          const finalFromRelay =
+            typeof msg.text === "string" ? msg.text.trim() : "";
+          const finalText = cleanPeriodArtifacts(
+            finalFromRelay
+              ? mergeAsrFinal(asrBufferRef.current, finalFromRelay)
+              : asrBufferRef.current,
+          );
+          let duplicateSkipped = false;
           if (finalText) {
             const normalized = finalText.replace(/\s+/g, " ").trim().toLowerCase();
             const lastFinal = lastFinalUserTranscriptRef.current;
@@ -517,6 +608,7 @@ export function useVoice({
               Date.now() - lastFinal.at < 15_000;
 
             if (isDuplicateFinal) {
+              duplicateSkipped = true;
               log.debug(`Skipping duplicate USER final: "${normalized.slice(0, 60)}..."`);
             } else {
               lastFinalUserTranscriptRef.current = { text: normalized, at: Date.now() };
@@ -533,15 +625,21 @@ export function useVoice({
           asrBufferRef.current = "";
           setState((s) => ({
             ...s,
-            userTranscript: "",
-            isProcessing: !!finalText,
+            userTranscript: finalText && !duplicateSkipped ? finalText : "",
+            isProcessing: Boolean(finalText) && !duplicateSkipped,
           }));
           break;
         }
 
+        case "response_started":
+          clearAsrProcessingTimer();
+          setState((s) => ({ ...s, userTranscript: "", aiTranscript: "", isProcessing: true }));
+          break;
+
         case "chat": {
           const text = extractText(msg.data);
           if (text) {
+            clearAsrProcessingTimer();
             chatBufferRef.current += text;
             setState((s) => ({
               ...s,
@@ -556,6 +654,7 @@ export function useVoice({
         case "tts_text": {
           const text = extractText(msg.data);
           if (text) {
+            clearAsrProcessingTimer();
             chatBufferRef.current += (chatBufferRef.current ? " " : "") + text;
             setState((s) => ({
               ...s,
@@ -575,6 +674,7 @@ export function useVoice({
 
         case "chat_ended":
         case "tts_ended": {
+          clearAsrProcessingTimer();
           const fullResponse = chatBufferRef.current.trim();
           chatBufferRef.current = "";
           // Keep last transcript visible until next AI speech (replaced by tts_text/chat)
@@ -608,6 +708,7 @@ export function useVoice({
         }
 
         case "session_reconnecting":
+          clearAsrProcessingTimer();
           interruptPlayback();
           if (chatBufferRef.current.trim()) {
             const text = chatBufferRef.current.trim();
@@ -624,6 +725,7 @@ export function useVoice({
           break;
 
         case "session_reconnected":
+          clearAsrProcessingTimer();
           setState((s) => ({ ...s, isProcessing: false }));
           break;
 
@@ -634,6 +736,7 @@ export function useVoice({
           // playing — let it finish naturally; the new question's audio
           // will be queued after it via sequential scheduling.
           if (!msg.auto) {
+            clearAsrProcessingTimer();
             interruptPlayback();
           }
           // Discard transition greeting text before saving progress
@@ -708,7 +811,17 @@ export function useVoice({
           break;
       }
     },
-    [interruptPlayback, extractText, onTranscript, onAIResponse, onError, onQuestionChange, saveProgress]
+    [
+      clearAsrProcessingTimer,
+      extractText,
+      interruptPlayback,
+      onAIResponse,
+      onError,
+      onQuestionChange,
+      onTranscript,
+      saveProgress,
+      startAsrProcessingTimer,
+    ]
   );
 
   /** Start capturing microphone audio and sending to relay */
@@ -745,6 +858,9 @@ export function useVoice({
         let sumSq = 0;
         for (let i = 0; i < inputData.length; i++) sumSq += inputData[i] * inputData[i];
         const rms = Math.sqrt(sumSq / inputData.length);
+        if (rms >= ASR_PROCESSING_AUDIO_ACTIVITY_RMS_THRESHOLD) {
+          lastMicActivityAtRef.current = performance.now();
+        }
         const level = Math.min(1, rms * 5);
         setState((s) => ({ ...s, audioLevel: level }));
 

@@ -1329,6 +1329,15 @@ export function VoiceInterface({
   const currentQuestionText = currentQVoice?.text || "";
   const isCodingQuestion = currentQVoice?.type === "CODING";
   const isWhiteboardQuestion = currentQVoice?.type === "WHITEBOARD";
+  const showVoiceTransitioning = voice.isTransitioning;
+  const showVoiceProcessing = !showVoiceTransitioning && voice.isProcessing;
+  const showVoiceSpeaking =
+    !showVoiceTransitioning && !showVoiceProcessing && voice.isSpeaking;
+  const showVoiceListening =
+    !showVoiceTransitioning &&
+    !showVoiceProcessing &&
+    !showVoiceSpeaking &&
+    voice.isListening;
 
   const codeEditorInitialData = useMemo(() => {
     const snippet = codeSnippets[activeSnippetIdx];
@@ -1906,7 +1915,7 @@ export function VoiceInterface({
               >
               {/* Status indicator */}
               <div className="flex flex-col items-center gap-4">
-                {voice.isTransitioning && (
+                {showVoiceTransitioning && (
                   <div className="flex items-center gap-2 text-muted-foreground">
                     <Loader2 className="h-5 w-5 animate-spin" />
                     <span className="text-sm font-medium">
@@ -1914,19 +1923,30 @@ export function VoiceInterface({
                     </span>
                   </div>
                 )}
-                {voice.isProcessing && (
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Loader2 className="h-5 w-5 animate-spin" />
-                    <span className="text-sm font-medium">Thinking...</span>
+                {showVoiceProcessing && (
+                  <div className="flex flex-col items-center gap-3">
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <Loader2 className="h-5 w-5 animate-spin" />
+                      <span className="text-sm font-medium">Thinking...</span>
+                    </div>
+                    {(() => {
+                      const lastUserMsg = messages.filter((m) => m.role === "user").pop();
+                      const displayText = lastUserMsg?.content || voice.userTranscript;
+                      return displayText ? (
+                        <p className="max-w-md text-center text-sm text-muted-foreground">
+                          &ldquo;{displayText}&rdquo;
+                        </p>
+                      ) : null;
+                    })()}
                   </div>
                 )}
-                {voice.isSpeaking && (
+                {showVoiceSpeaking && (
                   <div className="flex items-center gap-2 text-primary">
                     <Volume2 className="h-5 w-5 animate-pulse" />
                     <span className="text-sm font-medium">{aiName} is speaking...</span>
                   </div>
                 )}
-                {voice.isListening && (
+                {showVoiceListening && (
                   <div className="flex flex-col items-center gap-3">
                     {/* Mic icon with fill level */}
                     <div className="relative h-10 w-10">
@@ -1943,17 +1963,17 @@ export function VoiceInterface({
                 )}
 
                 {/* Live transcript while listening */}
-                {voice.isListening && voice.userTranscript && (
+                {showVoiceListening && voice.userTranscript && (
                   <p className="max-w-md text-center text-sm text-muted-foreground">
                     &ldquo;{voice.userTranscript}&rdquo;
                   </p>
                 )}
 
                 {/* Audio waveform — driven by real audio level */}
-                {(voice.isSpeaking || voice.isListening) && (
+                {(showVoiceSpeaking || showVoiceListening) && (
                   <div className="flex items-center gap-1">
                     {Array.from({ length: 20 }).map((_, i) => {
-                      const level = voice.isSpeaking ? 0.5 : voice.audioLevel;
+                      const level = showVoiceSpeaking ? 0.5 : voice.audioLevel;
                       const barVariance = Math.sin((i + Date.now() / 200) * 0.7) * 0.3 + 0.7;
                       return (
                         <div
@@ -1971,7 +1991,7 @@ export function VoiceInterface({
                 )}
 
                 {/* AI response text */}
-                {voice.aiTranscript && !voice.isListening && (
+                {voice.aiTranscript && !showVoiceListening && (
                   <p className="max-w-md text-center text-sm text-muted-foreground italic">
                     {voice.aiTranscript.length > 200
                       ? voice.aiTranscript.slice(0, 200) + "..."
@@ -2015,12 +2035,12 @@ export function VoiceInterface({
                   This is where the voice conversation happens
                 </p>
               )}
-              {voice.isConnected && !voice.isListening && (
+              {voice.isConnected && !showVoiceListening && !showVoiceProcessing && !showVoiceSpeaking && (
                 <p className="text-sm text-muted-foreground">
                   Click the mic to start speaking
                 </p>
               )}
-              {voice.isConnected && voice.isListening && !voice.isSpeaking && (
+              {voice.isConnected && showVoiceListening && (
                 <p className="text-sm text-muted-foreground">
                   Speak naturally — AI will respond automatically
                 </p>

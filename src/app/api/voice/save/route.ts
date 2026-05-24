@@ -5,7 +5,14 @@ import { getProvider, REPORT_MODEL } from "@/lib/ai/registry";
 import { createLogger } from "@/lib/logger";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { NextResponse } from "next/server";
-import { handleVoiceSave, type CompletionSession, type ProgressSession, type VoiceSaveOps, type VoiceSavePayload } from "./logic";
+import {
+  handleVoiceSave,
+  type ActivitySegment,
+  type CompletionSession,
+  type ProgressSession,
+  type VoiceSaveOps,
+  type VoiceSavePayload,
+} from "./logic";
 
 const log = createLogger("api/voice/save");
 const voiceSaveOps: VoiceSaveOps = {
@@ -37,16 +44,38 @@ const voiceSaveOps: VoiceSaveOps = {
 
     return (data as CompletionSession | null) ?? null;
   },
-  async loadFirstMessageTimestamp(sessionId) {
+  async loadActivitySegments(sessionId) {
+    const { data } = await supabaseAdmin
+      .from("sessions")
+      .select("activitySegments")
+      .eq("id", sessionId)
+      .single();
+    return ((data?.activitySegments as ActivitySegment[]) ?? []);
+  },
+  async closeOpenSegments(sessionId, now) {
+    const { data } = await supabaseAdmin
+      .from("sessions")
+      .select("activitySegments")
+      .eq("id", sessionId)
+      .single();
+    const segments = ((data?.activitySegments as ActivitySegment[]) ?? []);
+    const closed = segments.map((s) =>
+      s.leftAt === null ? { ...s, leftAt: now } : s,
+    );
+    await supabaseAdmin
+      .from("sessions")
+      .update({ activitySegments: closed })
+      .eq("id", sessionId);
+    return closed;
+  },
+  async loadMessageTimestamps(sessionId) {
     const { data } = await supabaseAdmin
       .from("messages")
       .select("timestamp")
       .eq("sessionId", sessionId)
-      .order("timestamp", { ascending: true })
-      .limit(1)
-      .single();
+      .order("timestamp", { ascending: true });
 
-    return (data?.timestamp as string | undefined) ?? null;
+    return (data ?? []).map((r) => r.timestamp as string);
   },
   async loadSessionForProgress(sessionId) {
     const { data } = await supabaseAdmin

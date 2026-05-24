@@ -14,7 +14,9 @@ type FunctionalScenarioId =
   | "default"
   | "english-failover"
   | "chinese-failover"
-  | "farewell-complete";
+  | "farewell-complete"
+  | "thinking-after-asr"
+  | "thinking-until-response";
 
 declare global {
   interface Window {
@@ -65,6 +67,75 @@ const functionalScenarios: Record<FunctionalScenarioId, FunctionalScenario> = {
         },
         { type: "json", delay: 180, message: { type: "tts_ended" } },
         { type: "json", delay: 200, message: { type: "interview_complete" } },
+      ],
+    },
+    "/ws/openai-voice": {
+      events: [{ type: "close", delay: 30 }],
+    },
+  },
+  "thinking-after-asr": {
+    "/ws/voice": {
+      events: [
+        { type: "ready", delay: 20 },
+        {
+          type: "json",
+          delay: 100,
+          message: {
+            type: "asr",
+            data: {
+              results: [{ text: "I led a reporting dashboard project" }],
+            },
+          },
+        },
+        {
+          type: "json",
+          delay: 220,
+          message: {
+            type: "asr_ended",
+            text: "I led a reporting dashboard project",
+          },
+        },
+      ],
+    },
+    "/ws/openai-voice": {
+      events: [{ type: "close", delay: 30 }],
+    },
+  },
+  "thinking-until-response": {
+    "/ws/voice": {
+      events: [
+        { type: "ready", delay: 20 },
+        {
+          type: "json",
+          delay: 100,
+          message: {
+            type: "asr",
+            data: {
+              results: [{ text: "I led a reporting dashboard project" }],
+            },
+          },
+        },
+        {
+          type: "json",
+          delay: 220,
+          message: {
+            type: "asr_ended",
+            text: "I led a reporting dashboard project",
+          },
+        },
+        { type: "json", delay: 260, message: { type: "response_started" } },
+        { type: "json", delay: 320, message: { type: "interrupt" } },
+        {
+          type: "json",
+          delay: 1_000,
+          message: {
+            type: "tts_text",
+            data: {
+              text: "Thanks for explaining that project.",
+            },
+          },
+        },
+        { type: "json", delay: 1_050, message: { type: "tts_ended" } },
       ],
     },
     "/ws/openai-voice": {

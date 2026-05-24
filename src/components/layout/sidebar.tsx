@@ -20,6 +20,7 @@ import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import {
     ArrowUpRight,
+    BrainCircuit,
     ChevronUp,
     FolderKanban,
     Gauge,
@@ -158,6 +159,7 @@ export function Sidebar({
   const projectNavigation = [
     { name: t("sidebar.dashboard"), href: "/dashboard", icon: LayoutDashboard },
     { name: t("sidebar.interviews"), href: "/interviews", icon: MessageSquare },
+    { name: "Practices", href: "/practices", icon: BrainCircuit },
     { name: t("sidebar.sessions"), href: "/candidates", icon: PlayCircle },
     { name: t("sidebar.questions"), href: "/questions", icon: HelpCircle },
   ];

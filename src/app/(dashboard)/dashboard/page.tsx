@@ -1,6 +1,7 @@
 "use client";
 
 import { useAppLocale } from "@/components/app-locale-provider";
+import { useOrg } from "@/components/org-provider";
 import { useProject } from "@/components/project-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -80,17 +81,19 @@ const TOOLTIP_STYLE = {
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { currentProject } = useProject();
+  const { currentOrg, isLoading: orgLoading } = useOrg();
+  const { currentProject, isLoading: projectLoading } = useProject();
   const { locale, t } = useAppLocale();
   const projectId = currentProject?.id;
+  const canLoadDashboard = !orgLoading && (!currentOrg || !projectLoading);
   const [creatingNew, setCreatingNew] = useState(false);
   const { data, isLoading } = trpc.interview.dashboardStats.useQuery(
     { projectId: projectId ?? undefined },
-    { enabled: !!projectId },
+    { enabled: canLoadDashboard },
   );
   const interviews = trpc.interview.list.useQuery(
     { limit: 5, projectId: projectId ?? undefined },
-    { enabled: !!projectId },
+    { enabled: canLoadDashboard },
   );
 
   return (

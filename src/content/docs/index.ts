@@ -5,6 +5,7 @@ import type { DocCategory, DocArticle } from "./types";
 import { gettingStartedArticles } from "./getting-started";
 import { creatingInterviewsArticles } from "./creating-interviews";
 import { managingCandidatesArticles } from "./managing-candidates";
+import { practicesArticles } from "./practices";
 import { takingAnInterviewArticles } from "./taking-an-interview";
 import { resultsAnalyticsArticles } from "./results-analytics";
 import { teamsOrganizationsArticles } from "./teams-organizations";
@@ -46,12 +47,20 @@ export const categories: DocCategory[] = [
     order: 4,
   },
   {
+    slug: "practices",
+    title: "Practices",
+    description: "Rehearse existing interviews with voice coaching, AI feedback, suggested answers, and progress tracking",
+    iconName: "BrainCircuit",
+    audience: "creators",
+    order: 5,
+  },
+  {
     slug: "results-analytics",
     title: "Results & Analytics",
     description: "Review transcripts, AI insights, and export reports",
     iconName: "BarChart3",
     audience: "creators",
-    order: 5,
+    order: 6,
   },
   {
     slug: "teams-organizations",
@@ -59,7 +68,7 @@ export const categories: DocCategory[] = [
     description: "Collaborate with your team and manage projects",
     iconName: "Building2",
     audience: "creators",
-    order: 6,
+    order: 7,
   },
   {
     slug: "account-security",
@@ -92,6 +101,7 @@ const allArticles: DocArticle[] = [
   ...creatingInterviewsArticles,
   ...managingCandidatesArticles,
   ...takingAnInterviewArticles,
+  ...practicesArticles,
   ...resultsAnalyticsArticles,
   ...teamsOrganizationsArticles,
   ...accountSecurityArticles,

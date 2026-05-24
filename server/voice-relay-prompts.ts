@@ -7,15 +7,15 @@
  * each template below.
  */
 import {
-  AI_TONE_ZH,
-  AI_TONE_ZH_DEFAULT,
-  type BiText,
-  bt,
-  INTERVIEW_MESSAGES,
-  QUESTION_TYPE_HINT,
-  QUESTION_TYPE_LABEL,
-  ROLE_LABELS,
-  SCREEN_PROMPT,
+    AI_TONE_ZH,
+    AI_TONE_ZH_DEFAULT,
+    type BiText,
+    bt,
+    INTERVIEW_MESSAGES,
+    QUESTION_TYPE_HINT,
+    QUESTION_TYPE_LABEL,
+    ROLE_LABELS,
+    SCREEN_PROMPT,
 } from "../src/lib/i18n";
 
 // ── Types ───────────────────────────────────────────────────────────
@@ -41,7 +41,15 @@ export interface ResponsePromptParams {
   whiteboardLoading?: boolean;
   correctionGuard?: string;
   antiRepetition?: string;
+  recentInterviewerResponses?: string[];
+  latestInterviewerPrompt?: string;
+  latestParticipantAnswer?: string;
   forceLanguage?: string;
+}
+
+/** For follow-up budget lines: mid-interview vs last question use different closing language */
+export interface FollowUpBudgetContext {
+  isLastQuestion: boolean;
 }
 
 // ── Spoken text templates ───────────────────────────────────────────
@@ -248,28 +256,40 @@ Note: ONLY categories 4 and 5 may include ${nextToken}. ONLY category 6 may incl
 Important: when you are asking the participant to explain their approach (category 2), you MUST NOT add ${nextToken} because you still need to hear their explanation.`,
       };
     },
-    pastLimit(nextToken: string): BiText {
+    pastLimit(nextToken: string, ctx: FollowUpBudgetContext): BiText {
+      if (ctx.isLastQuestion) {
+        return {
+          zh: `这是整场访谈的最后一道题，本题也讨论很多轮了。请自然收尾本题（简短总结或接住对方最后一点），然后在回复末尾加上 ${nextToken}，以便进入访谈结束流程。`,
+          en: `This is the LAST question and it has been discussed thoroughly. Close this topic naturally (brief acknowledgement or summary), then append ${nextToken} at the end to proceed toward wrapping up the interview.`,
+        };
+      }
       return {
-        zh: `这个问题已经讨论了很多轮了，你必须结束。简短感谢对方，然后在回复末尾加上 ${nextToken}。`,
-        en: `This question has been discussed extensively. You must wrap up now. Briefly thank the participant and append ${nextToken} at the end.`,
+        zh: `你已在本题上追问了非常多轮。请**只结束当前这道题**：简短接住对方的最后一点，然后在回复末尾加上 ${nextToken} 以进入**下一道题**。整场访谈**尚未结束**。禁止使用整场结束用语，例如「感谢你今天的时间」「今天就先到这里」「我们的访谈到此结束」等。如果对方刚才在直接问你问题，先用一两句话正面回答，再过渡。`,
+        en: `You have hit the maximum follow-up depth on THIS question only. Close **this topic** briefly, then append ${nextToken} at the end to move to the **next question**. The interview is **NOT over** — more questions remain. Do NOT use whole-session closings such as "thank you for your time today", "great speaking with you today", "that concludes our interview", or similar. If the participant just asked you a direct question, answer it in one or two short sentences first, then transition.`,
       };
     },
-    atLimit(nextToken: string): BiText {
+    atLimit(nextToken: string, ctx: FollowUpBudgetContext): BiText {
+      if (ctx.isLastQuestion) {
+        return {
+          zh: `这是最后一题。你已经对这道题追问了足够多次。除非对方核心观点仍不清楚，否则简短感谢并在末尾加上 ${nextToken}。若确实还需要一次追问来澄清要点，可以不加 ${nextToken}。`,
+          en: `This is the last question. You've had enough follow-ups unless the participant's core point is still unclear — briefly acknowledge and append ${nextToken}. Only skip ${nextToken} if you truly need one more exchange to clarify the key point.`,
+        };
+      }
       return {
-        zh: `你已经对这个问题追问了足够多次了。除非对方的核心观点仍不清楚，否则你应该简短感谢并在末尾加上 ${nextToken}。如果确实还需要一次追问来澄清要点，可以不加 ${nextToken}。`,
-        en: `You've had enough follow-ups on this question. Unless the participant's core point is still unclear, you should briefly acknowledge and append ${nextToken}. Only skip ${nextToken} if you truly need one more exchange to clarify the key point.`,
+        zh: `你对本题的追问次数快达到上限。除非对方核心观点仍不清楚，否则应简短接住并加上 ${nextToken} **只进入下一题**。不要说整场访谈结束类的话——后面还有题目。若还需一次追问澄清要点，可不加 ${nextToken}。若对方在问你问题，先简短回答。`,
+        en: `You are at the follow-up limit for THIS question. Unless the participant's core point is still unclear, briefly acknowledge and append ${nextToken} to advance to the **next question only**. Do NOT imply the entire interview is ending — more questions follow. Skip ${nextToken} only if you truly need one more short exchange to clarify. If they asked you a question, answer briefly first.`,
       };
     },
     oneLeft(nextToken: string): BiText {
       return {
-        zh: `你最多还能追问1次。如果对方回答已经充分和清晰，简短感谢并在末尾加上 ${nextToken}。否则可以追问一个相关细节。`,
-        en: `You have at most 1 follow-up left. If the answer is already sufficient, briefly acknowledge and append ${nextToken}. Otherwise ask one focused follow-up.`,
+        zh: `你最多还能追问1次。只有在对方确实是在回答当前问题时才应用这个追问预算；如果他们是在和你交流或问你问题，先自然回应。如果回答已经充分和清晰，简短感谢并在末尾加上 ${nextToken}。否则可以追问一个相关细节。`,
+        en: `You have at most 1 follow-up left. Apply this follow-up budget only when the participant is actually answering the current question; if they are talking to you or asking a question, respond naturally first. If the answer is already sufficient, briefly acknowledge and append ${nextToken}. Otherwise ask one focused follow-up.`,
       };
     },
     remaining(turnsLeft: number, nextToken: string): BiText {
       return {
-        zh: `你还可以追问最多${turnsLeft}次。根据回答内容决定是否需要追问。如果回答已经充分完整，可以简短感谢并在末尾加上 ${nextToken}。`,
-        en: `You have up to ${turnsLeft} follow-ups remaining. Decide based on the answer content whether to probe further. If the answer is already thorough, acknowledge and append ${nextToken}.`,
+        zh: `你还可以追问最多${turnsLeft}次。只有在对方确实是在回答当前问题时才应用这个追问预算；如果他们是在和你交流或问你问题，先自然回应。根据回答内容决定是否需要追问。如果回答已经充分完整，可以简短感谢并在末尾加上 ${nextToken}。`,
+        en: `You have up to ${turnsLeft} follow-ups remaining. Apply this follow-up budget only when the participant is actually answering the current question; if they are talking to you or asking a question, respond naturally first. Decide based on the answer content whether to probe further. If the answer is already thorough, acknowledge and append ${nextToken}.`,
       };
     },
   },
@@ -280,6 +300,18 @@ Important: when you are asking the participant to explain their approach (catego
       const descEn = p.qDescription ? `\nAdditional context: ${p.qDescription}` : "";
       const memZh = p.previousContext ? `\n之前的讨论（仅供参考，不要重复这些话题）：\n${p.previousContext}\n` : "";
       const memEn = p.previousContext ? `\nPrevious discussion (for context only — do NOT re-ask these topics):\n${p.previousContext}\n` : "";
+      const recentZh = p.recentInterviewerResponses?.length
+        ? `\n最近你已经说过或问过（不要复述或重问）：\n${p.recentInterviewerResponses.map((r, i) => `${i + 1}. ${r}`).join("\n")}\n如果受访者指出你重复提问，先承认他们已经回答过，然后基于已有回答换一个新的、更具体的角度；如果没有必要继续追问，就简短总结并进入下一题。\n`
+        : "";
+      const recentEn = p.recentInterviewerResponses?.length
+        ? `\nRecent things you already said or asked (do NOT repeat or re-ask):\n${p.recentInterviewerResponses.map((r, i) => `${i + 1}. ${r}`).join("\n")}\nIf the participant points out that you repeated yourself, acknowledge that they already answered, then use a new, more specific angle based on their existing answer; if no useful follow-up remains, briefly summarize and move on.\n`
+        : "";
+      const latestExchangeZh = p.latestInterviewerPrompt && p.latestParticipantAnswer
+        ? `\n最近一轮已完成：\n你刚刚问过：${p.latestInterviewerPrompt}\n受访者最新发言：${p.latestParticipantAnswer}\n先判断受访者的发言是在正面回答你的问题，还是在进行元沟通（如确认能否听到、打招呼、问你问题等）。如果是元沟通，先回应它，然后继续之前的讨论方向。如果是正面回答，不要再重问同一个问题。如果已经正面回答了你刚才的问题，默认应简短确认并进入下一题。只有当关键信息仍明显缺失时，才追问新的具体细节。\n`
+        : "";
+      const latestExchangeEn = p.latestInterviewerPrompt && p.latestParticipantAnswer
+        ? `\nLatest exchange:\nYou just asked: ${p.latestInterviewerPrompt}\nThe participant's latest utterance: ${p.latestParticipantAnswer}\nFirst determine if the participant's utterance is a substantive answer to your question, or a meta/interaction comment (e.g. checking if you can hear them, greeting, asking you a question). If it's a meta-comment, respond to it and then continue from the discussion topic you were on. If it's a substantive answer, do not re-ask the same question. If the answer directly addressed your question, default to briefly acknowledging and moving to the next question. Ask one new specific detail only when a key requirement is still clearly missing.\n`
+        : "";
       const codeZh = p.codeContent ? `\n受访者当前的代码（${p.codeLanguage || "plaintext"}）：\n\`\`\`\n${p.codeContent}\n\`\`\`\n` : "";
       const codeEn = p.codeContent ? `\nParticipant's current code (${p.codeLanguage || "plaintext"}):\n\`\`\`\n${p.codeContent}\n\`\`\`\n` : "";
       const wbZh = p.whiteboardDescription ? `\n受访者当前的白板内容：${p.whiteboardDescription}\n` : "";
@@ -313,7 +345,7 @@ Important: when you are asking the participant to explain their approach (catego
         : "";
       return {
         zh: `你是面试官"${p.aiName}"，正在进行一场关于"${p.title}"的访谈。
-${memZh}${langInstr}
+${memZh}${recentZh}${latestExchangeZh}${langInstr}
 当前问题（第${p.qNum}/${p.totalQs}个）：「${p.qText}」${descZh}${p.choiceInstruction}
 ${codeZh}${wbZh}${visibilityZh}
 对话记录：
@@ -339,10 +371,10 @@ ${p.followUpInstruction}
 - ${p.nextToken} 只能出现在不含任何问题的简短句末尾
 - 只能围绕「${p.qText}」这个问题
 - 禁止编造不相关的问题或话题
-- 如果受访者之前已经讨论过的内容与当前问题相关，可以引用但不要重复追问
+- 如果受访者之前已经讨论过的内容与当前问题相关，可以引用但不要重复追问；如果他们已经回答了你的问题，不要换个措辞再问同一个问题
 - 不要重复你之前已经说过的话，每次回复都要有新的内容`,
         en: `You are interviewer "${p.aiName}" conducting an interview about "${p.title}".
-${memEn}${langInstr}
+${memEn}${recentEn}${latestExchangeEn}${langInstr}
 Current question (${p.qNum}/${p.totalQs}): "${p.qText}"${descEn}${p.choiceInstruction}
 ${codeEn}${wbEn}${visibilityEn}
 Conversation so far:
@@ -368,7 +400,7 @@ Rules:
 - ${p.nextToken} may ONLY appear at the end of a short statement with NO questions
 - Only discuss the question "${p.qText}"
 - Never invent unrelated questions or topics
-- If something the participant discussed earlier is relevant to the current question, you may reference it but do NOT re-ask about it
+- If something the participant discussed earlier is relevant to the current question, you may reference it but do NOT re-ask about it; if they already answered your question, do not ask the same question with different wording
 - Do NOT repeat what you already said — each response must contain new content`,
       };
     },
@@ -378,6 +410,24 @@ Rules:
       const descEn = p.qDescription ? `\nAdditional context: ${p.qDescription}` : "";
       const memZh = p.previousContext ? `\n之前的讨论（仅供参考，不要重复这些话题）：\n${p.previousContext}\n` : "";
       const memEn = p.previousContext ? `\nPrevious discussion (for context only — do NOT re-ask these topics):\n${p.previousContext}\n` : "";
+      const recentZh = p.recentInterviewerResponses?.length
+        ? `\n最近你已经说过或问过（不要复述或重问）：\n${p.recentInterviewerResponses.map((r, i) => `${i + 1}. ${r}`).join("\n")}\n如果受访者指出你重复提问，先承认他们已经回答过，然后基于已有回答换一个新的、更具体的角度；如果没有必要继续追问，就简短总结并进入下一题。\n`
+        : "";
+      const recentEn = p.recentInterviewerResponses?.length
+        ? `\nRecent things you already said or asked (do NOT repeat or re-ask):\n${p.recentInterviewerResponses.map((r, i) => `${i + 1}. ${r}`).join("\n")}\nIf the participant points out that you repeated yourself, acknowledge that they already answered, then use a new, more specific angle based on their existing answer; if no useful follow-up remains, briefly summarize and move on.\n`
+        : "";
+      const latestExchangeZh = p.latestInterviewerPrompt && p.latestParticipantAnswer
+        ? `\n最近一轮已完成：\n你刚刚问过：${p.latestInterviewerPrompt}\n受访者最新发言：${p.latestParticipantAnswer}\n先判断受访者的发言是在正面回答你的问题，还是在进行元沟通（如确认能否听到、打招呼、问你问题等）。如果是元沟通，先回应它，然后继续之前的讨论方向。如果是正面回答，不要再重问同一个问题。如果已经正面回答了你刚才的问题，默认应简短确认并进入下一题。只有当关键信息仍明显缺失时，才追问新的具体细节。\n`
+        : "";
+      const latestExchangeEn = p.latestInterviewerPrompt && p.latestParticipantAnswer
+        ? `\nLatest exchange:\nYou just asked: ${p.latestInterviewerPrompt}\nThe participant's latest utterance: ${p.latestParticipantAnswer}\nFirst determine if the participant's utterance is a substantive answer to your question, or a meta/interaction comment (e.g. checking if you can hear them, greeting, asking you a question). If it's a meta-comment, respond to it and then continue from the discussion topic you were on. If it's a substantive answer, do not re-ask the same question. If the answer directly addressed your question, default to briefly acknowledging and moving to the next question. Ask one new specific detail only when a key requirement is still clearly missing.\n`
+        : "";
+      const noRequestionZh = p.userTurns > 0
+        ? `\n**禁止重述原题**：受访者已经回答过原题「${p.qText}」。绝对不要在回复中重新朗读、复述或重新提出原题。如果需要把对方引回当前讨论，请引用你们最近讨论的具体方面，而不是从头开始。\n`
+        : "";
+      const noRequestionEn = p.userTurns > 0
+        ? `\n**NEVER re-state the original question**: The participant has already answered the original question "${p.qText}". Do NOT re-read, re-state, or re-ask the original question text in your response. If you need to redirect the conversation, reference the specific aspect you were most recently discussing, not the original question.\n`
+        : "";
       const guardZh = (p.correctionGuard || "") + (p.antiRepetition || "");
       const guardEn = (p.correctionGuard || "") + (p.antiRepetition || "");
       const langInstr = p.forceLanguage
@@ -385,14 +435,18 @@ Rules:
         : "";
       return {
         zh: `你是面试官"${p.aiName}"，正在进行一场关于"${p.title}"的访谈。
-${memZh}${langInstr}
+${memZh}${recentZh}${latestExchangeZh}${noRequestionZh}${langInstr}
 当前问题（第${p.qNum}/${p.totalQs}个）：「${p.qText}」${descZh}${p.choiceInstruction}
-对方已回答了${p.userTurns}轮。
+对方已发言${p.userTurns}轮。
 
 对话记录：
 ${p.history}
 ${guardZh}
-请根据受访者最新的回答，生成一个简短的回应（1-3句话）。
+请根据受访者最新的发言，生成一个简短的回应（1-3句话）。
+在决定是否追问之前，先判断这次发言的真实意图：
+- 如果对方是在和你交流、问你问题、确认互动状态、打招呼、请求澄清或寻求帮助，请先自然回应这次发言（如"你好，我能听到你"），然后继续你们之前正在讨论的话题方向；不要把它当成当前面试题的简短回答，也不要因此追问"请展开"之类的问题，更不要从头开始重问原题。
+- 如果对方是在回答当前问题，请围绕当前问题判断是否需要追问、总结或进入下一题。
+- 如果对方只是在思考、自言自语或表达卡住了，请短暂接住，并给他们继续回答的空间。
 直接输出你要说的话，不要加任何前缀、标签、引号或解释。
 
 ${p.followUpInstruction}
@@ -403,6 +457,8 @@ ${p.followUpInstruction}
 - 如果受访者明确要求回到上一个问题（如"上一题"、"回到上一个"等），在回复末尾加上 ${p.prevToken}
 
 规则：
+- 对话型/元沟通型发言不是"回答太短"。必须先回应它本身；只有在回应后需要把对方带回当前题目时，才轻轻提示继续回答。
+- 如果对方问的是和当前题目无关但和面试互动相关的问题（如"你能听到我吗"），要简短回答（如"能听到"），然后自然回到你们最近讨论的具体话题方向；除非对方明确要求导航，否则不要加 ${p.nextToken}。
 - 如果对方的回答非常简短或明显不想展开（如"就是喜欢"、"没有理由"、"不知道"等），不要继续追问，直接简短感谢并在末尾加上 ${p.nextToken}
 - 不要连续追问同一个角度。如果之前已经追问过但对方没有展开，简短感谢并加上 ${p.nextToken}
 - 如果你的回复包含问号"？"或任何提问，绝对不能加 ${p.nextToken}
@@ -410,17 +466,21 @@ ${p.followUpInstruction}
 - ${p.nextToken} 只能出现在不含任何问题的简短感谢句末尾（如"好的，谢谢你的分享${p.nextToken}"）
 - 只能围绕「${p.qText}」这个问题
 - 禁止编造不相关的问题或话题
-- 如果受访者之前已经讨论过的内容与当前问题相关，可以引用但不要重复追问
+- 如果受访者之前已经讨论过的内容与当前问题相关，可以引用但不要重复追问；如果他们已经回答了你的问题，不要换个措辞再问同一个问题
 - 不要重复你之前已经说过的话，每次回复都要有新的内容`,
         en: `You are interviewer "${p.aiName}" conducting an interview about "${p.title}".
-${memEn}${langInstr}
+${memEn}${recentEn}${latestExchangeEn}${noRequestionEn}${langInstr}
 Current question (${p.qNum}/${p.totalQs}): "${p.qText}"${descEn}${p.choiceInstruction}
-The participant has responded ${p.userTurns} time(s) so far.
+The participant has spoken ${p.userTurns} time(s) so far.
 
 Conversation so far:
 ${p.history}
 ${guardEn}
-Generate a brief response (1-3 sentences) to the participant's latest answer.
+Generate a brief response (1-3 sentences) to the participant's latest utterance.
+Before deciding whether to probe, infer the intent of the latest utterance:
+- If the participant is talking to you, asking a question, checking the interaction state, greeting you, asking for clarification, or seeking help, respond naturally to that utterance first (e.g. "Yes, I can hear you"), then continue from the specific discussion topic you were on. Do not treat it as a short answer to the interview question, do not respond with a generic "please elaborate", and do NOT restart from the original question.
+- If the participant is answering the current question, evaluate that answer in the context of the current question and decide whether to probe, summarize, or move on.
+- If the participant is thinking aloud, speaking to themselves, or expressing that they are stuck, briefly acknowledge that and give them room to continue.
 Output ONLY what you would say — no prefixes, labels, quotes, or explanations.
 
 ${p.followUpInstruction}
@@ -431,6 +491,8 @@ Navigation control:
 - If the participant explicitly asks to go back to the previous question, append ${p.prevToken}
 
 Rules:
+- Conversation/meta utterances are not "too brief answers." Respond to the utterance itself first; only gently bridge back to the current question if that helps the participant continue.
+- If they ask about the interview interaction rather than the interview topic (e.g. "Can you hear me?"), answer briefly (e.g. "Yes, I can hear you"), then return to the specific discussion topic you were on most recently. Do not append ${p.nextToken} unless they clearly ask to navigate.
 - If the participant's answer is very brief or clearly shows they don't want to elaborate (e.g. "just because", "no reason", "I don't know"), do NOT keep pressing. Just briefly acknowledge and append ${p.nextToken}
 - Do NOT repeatedly ask about the same angle. If you already probed and the participant didn't elaborate, briefly acknowledge and append ${p.nextToken}
 - If your reply contains a question mark "?" or any question, you MUST NOT include ${p.nextToken}
@@ -438,7 +500,7 @@ Rules:
 - ${p.nextToken} may ONLY appear at the end of a short acknowledgement with NO questions (e.g. "Thank you for sharing${p.nextToken}")
 - Only discuss the question "${p.qText}"
 - Never invent unrelated questions or topics
-- If something the participant discussed earlier is relevant to the current question, you may reference it but do NOT re-ask about it
+- If something the participant discussed earlier is relevant to the current question, you may reference it but do NOT re-ask about it; if they already answered your question, do not ask the same question with different wording
 - Do NOT repeat what you already said — each response must contain new content`,
       };
     },

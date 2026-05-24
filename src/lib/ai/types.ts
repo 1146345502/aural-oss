@@ -1,5 +1,6 @@
 export type LLMContentPart =
   | { type: "text"; text: string }
+  | { type: "inline_audio"; mimeType: string; data: string }
   | { type: "image_url"; image_url: { url: string } };
 
 export interface LLMMessage {

@@ -188,7 +188,7 @@ test("RelayConnector falls back to the secondary relay when the primary never be
   assert.equal(connector.isReady, true);
 });
 
-test("RelayConnector reconnects to the alternate relay after a mid-session disconnect and sends fresh init state", async () => {
+test("RelayConnector fails over to the alternate relay after a mid-session disconnect when reconnect is disabled", async () => {
   const sockets: FakeSocket[] = [];
   const failovers: Array<{ from: string; to: string; reason: string }> = [];
   let currentQuestionIndex = 0;
@@ -198,6 +198,7 @@ test("RelayConnector reconnects to the alternate relay after a mid-session disco
       { kind: "openai", url: "ws://openai-primary:8767" },
       { kind: "voice", url: "ws://voice-fallback:8766" },
     ],
+    reconnectAttempts: 0,
     buildInitMessage: () => ({
       type: "init",
       context: { startQuestionIndex: currentQuestionIndex },
@@ -242,6 +243,115 @@ test("RelayConnector reconnects to the alternate relay after a mid-session disco
   const sent = connector.sendJson({ type: "ping" });
   assert.equal(sent, true);
   assert.deepEqual(JSON.parse(sockets[1].sent[1]), { type: "ping" });
+});
+
+test("RelayConnector retries the same relay before failing over after a mid-session disconnect", async () => {
+  const sockets: FakeSocket[] = [];
+  const failovers: Array<{ from: string; to: string; reason: string }> = [];
+  const reconnects: Array<{ attempt: number; kind: string }> = [];
+
+  const connector = new RelayConnector<Record<string, unknown>>({
+    targets: [
+      { kind: "voice", url: "ws://voice-primary:8766" },
+      { kind: "openai", url: "ws://openai-fallback:8767" },
+    ],
+    reconnectAttempts: 2,
+    reconnectDelayMs: 1,
+    readyTimeoutMs: 50,
+    buildInitMessage: () => ({ type: "init" }),
+    createSocket: (url) => {
+      const socket = new FakeSocket(url);
+      sockets.push(socket);
+      return socket;
+    },
+    onJsonMessage: () => {},
+    onReconnecting: (attempt, _max, target) => {
+      reconnects.push({ attempt, kind: target.kind });
+    },
+    onFailover: ({ from, to, reason }) => {
+      failovers.push({ from: from.kind, to: to.kind, reason });
+    },
+  });
+
+  // Initial connection to voice-primary succeeds
+  const connectPromise = connector.connect();
+  sockets[0].emitOpen();
+  await flush();
+  sockets[0].emitJson({ type: "ready" });
+  await connectPromise;
+  assert.equal(connector.target?.kind, "voice");
+
+  // Mid-session disconnect — triggers reconnect attempts
+  sockets[0].emitClose();
+
+  // Reconnect attempt 1: socket created to same target, but we let it close (fail)
+  await waitFor(() => sockets.length >= 2, 2_000);
+  assert.equal(sockets[1].url, "ws://voice-primary:8766");
+  sockets[1].emitClose();
+
+  // Reconnect attempt 2: socket created to same target again, also fails
+  await waitFor(() => sockets.length >= 3, 2_000);
+  assert.equal(sockets[2].url, "ws://voice-primary:8766");
+  sockets[2].emitClose();
+
+  // Both reconnect attempts exhausted → falls over to openai
+  await waitFor(() => sockets.length >= 4, 2_000);
+  assert.equal(sockets[3].url, "ws://openai-fallback:8767");
+  sockets[3].emitOpen();
+  await flush();
+  sockets[3].emitJson({ type: "ready" });
+
+  await waitFor(() => failovers.length === 1, 2_000);
+  assert.equal(failovers[0].from, "voice");
+  assert.equal(failovers[0].to, "openai");
+  assert.equal(reconnects.length, 2);
+  assert.equal(reconnects[0].attempt, 1);
+  assert.equal(reconnects[1].attempt, 2);
+});
+
+test("RelayConnector reconnects to the same relay successfully without failover", async () => {
+  const sockets: FakeSocket[] = [];
+  const failovers: Array<{ from: string; to: string }> = [];
+
+  const connector = new RelayConnector<Record<string, unknown>>({
+    targets: [
+      { kind: "voice", url: "ws://voice-primary:8766" },
+      { kind: "openai", url: "ws://openai-fallback:8767" },
+    ],
+    reconnectAttempts: 2,
+    reconnectDelayMs: 1,
+    buildInitMessage: () => ({ type: "init" }),
+    createSocket: (url) => {
+      const socket = new FakeSocket(url);
+      sockets.push(socket);
+      return socket;
+    },
+    onJsonMessage: () => {},
+    onFailover: ({ from, to }) => {
+      failovers.push({ from: from.kind, to: to.kind });
+    },
+  });
+
+  const connectPromise = connector.connect();
+  sockets[0].emitOpen();
+  await flush();
+  sockets[0].emitJson({ type: "ready" });
+  await connectPromise;
+
+  // Mid-session disconnect
+  sockets[0].emitClose();
+
+  // Reconnect attempt 1 succeeds — same target, no failover
+  await waitFor(() => sockets.length >= 2, 2_000);
+  assert.equal(sockets[1].url, "ws://voice-primary:8766");
+  sockets[1].emitOpen();
+  await flush();
+  sockets[1].emitJson({ type: "ready" });
+  await flush();
+
+  assert.equal(connector.target?.kind, "voice");
+  assert.equal(connector.isReady, true);
+  assert.equal(failovers.length, 0);
 });
 
 test("RelayConnector reports permanent failure after all relay targets fail", async () => {

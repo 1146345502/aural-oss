@@ -65,7 +65,10 @@ export function computeMessageBasedDuration(
 }
 
 export type CompletionSession = {
+  status: string;
   startedAt: string;
+  lastActivityAt?: string | null;
+  activitySegments: unknown;
   interview: {
     title: string;
     objective: string | null;
@@ -91,7 +94,12 @@ export type VoiceSaveOps = {
   loadSessionForCompletion: (
     sessionId: string,
   ) => Promise<CompletionSession | null>;
-  loadFirstMessageTimestamp: (sessionId: string) => Promise<string | null>;
+  loadActivitySegments: (sessionId: string) => Promise<ActivitySegment[]>;
+  closeOpenSegments: (
+    sessionId: string,
+    now: string,
+  ) => Promise<ActivitySegment[]>;
+  loadMessageTimestamps: (sessionId: string) => Promise<string[]>;
   loadSessionForProgress: (sessionId: string) => Promise<ProgressSession | null>;
   updateSession: (
     sessionId: string,
@@ -104,6 +112,8 @@ export type VoiceSaveOps = {
     language?: string | null,
     questions?: { text: string; order: number; type?: string }[] | null,
     assessmentCriteria?: { name: string; description: string }[] | null,
+    ownerUserId?: string,
+    projectId?: string,
   ) => Promise<void>;
   log: {
     info: (message: string) => void;
@@ -130,20 +140,27 @@ export async function handleVoiceSave(
     if (complete) {
       const session = await ops.loadSessionForCompletion(sessionId);
 
-      if (session) {
-        const firstMessageTimestamp =
-          await ops.loadFirstMessageTimestamp(sessionId);
-
-        const actualStart = firstMessageTimestamp
-          ? new Date(firstMessageTimestamp).getTime()
-          : new Date(session.startedAt).getTime();
+      if (session && session.status !== "COMPLETED") {
         const now = ops.now();
-        const duration = Math.round((now.getTime() - actualStart) / 1000);
+        const cappedNowMs = effectiveNowForSession(session.lastActivityAt, now.getTime());
+        const cappedNow = new Date(cappedNowMs).toISOString();
+        const segments = await ops.closeOpenSegments(sessionId, cappedNow);
+        let duration: number;
+        if (segments.length > 0) {
+          duration = computeSegmentDuration(segments, cappedNowMs);
+        } else {
+          const timestamps = await ops.loadMessageTimestamps(sessionId);
+          const msgTimesMs = timestamps.map((t) => new Date(t).getTime());
+          duration = computeMessageBasedDuration(
+            new Date(session.startedAt).getTime(),
+            msgTimesMs,
+            cappedNowMs,
+          );
+        }
 
         await ops.updateSession(sessionId, {
           status: "COMPLETED" as const,
           completedAt: now.toISOString(),
-          startedAt: new Date(actualStart).toISOString(),
           totalDurationSeconds: duration,
         });
 
@@ -158,6 +175,8 @@ export async function handleVoiceSave(
             interview.language,
             interview.questions,
             interview.assessmentCriteria,
+            interview.userId,
+            interview.projectId,
           )
           .catch((err) => {
             ops.log.error("Background summary generation failed:", err);

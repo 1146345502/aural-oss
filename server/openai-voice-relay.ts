@@ -12,18 +12,18 @@ import { config } from "dotenv";
 import { WebSocket, WebSocketServer } from "ws";
 import { createLogger } from "../src/lib/logger";
 import {
-  type BigModelAsrConfig,
-  BIGMODEL_ASR_URL,
-  buildBigModelAudioRequest,
-  buildBigModelFullRequest,
-  buildBigModelHeaders,
-  parseAsrResponse,
-} from "./volcengine-asr";
-import {
-  DEFAULT_TTS_BARGE_IN_MIN_AUDIO_BYTES,
-  DEFAULT_TTS_BARGE_IN_MIN_AUDIO_MS,
-  shouldAllowTtsBargeIn,
+    DEFAULT_TTS_BARGE_IN_MIN_AUDIO_BYTES,
+    DEFAULT_TTS_BARGE_IN_MIN_AUDIO_MS,
+    shouldAllowTtsBargeIn,
 } from "./openai-voice-relay-helpers";
+import {
+    type BigModelAsrConfig,
+    BIGMODEL_ASR_URL,
+    buildBigModelAudioRequest,
+    buildBigModelFullRequest,
+    buildBigModelHeaders,
+    parseAsrResponse,
+} from "./volcengine-asr";
 
 const log = createLogger("openai-relay");
 
@@ -118,13 +118,17 @@ function mergeAsrText(previous: string, incoming: string): string {
   const prevLower = prev.toLowerCase();
   const nextLower = next.toLowerCase();
 
+  // Later chunk fully supersedes earlier (streaming refinement).
   if (nextLower.includes(prevLower)) return next;
   if (prevLower.includes(nextLower)) return prev;
 
-  // Avoid regressing a long interim transcript into a tiny trailing fragment.
+  // Drop tiny trailing fragments that are not extensions of the longer text.
   if (next.length + 8 < prev.length) return prev;
 
-  return next.length >= prev.length ? next : prev;
+  // Distinct segments in the same speaking turn (e.g. ASR finalized twice, or
+  // Volc + Whisper partials that are not substring-related). Concatenate so the
+  // model and Volc context see the full user turn instead of losing the shorter half.
+  return `${prev} ${next}`.replace(/\s+/g, " ").trim();
 }
 
 const FAST_NEXT_PATTERNS = [
@@ -459,7 +463,7 @@ async function handleMicTest(browserWs: WebSocket) {
     if (browserWs.readyState === WebSocket.OPEN)
       browserWs.send(JSON.stringify({ type: "timeout" }));
     cleanup();
-  }, 20_000);
+  }, 10 * 60 * 1000);
 
   function cleanup() {
     clearTimeout(autoTimeout);
@@ -481,8 +485,9 @@ async function handleMicTest(browserWs: WebSocket) {
     const reqid = randomUUID().replace(/-/g, "");
     const asrConfig: BigModelAsrConfig = {
       format: "pcm", rate: 16000, bits: 16, channels: 1, codec: "raw",
-      showUtterance: true, resultType: "single", enablePunc: true,
-      endWindowSize: 500, forceToSpeechTime: 1000,
+      showUtterance: true, resultType: "full", enablePunc: true,
+      endWindowSize: 800, forceToSpeechTime: 3000,
+      enableNonstream: true, ssdVersion: "200",
     };
 
     const wsHeaders = buildBigModelHeaders(VOLC_ASR_APPID, VOLC_ASR_TOKEN, reqid);
@@ -769,7 +774,7 @@ async function handleInterview(browserWs: WebSocket, ctx: InterviewContext) {
   let lastTranscriptUpdateAt = 0;
   const USER_TRANSCRIPT_STABILITY_MS = 900;
   const USER_TRANSCRIPT_MAX_WAIT_MS = 4500;
-  const USER_TURN_SPLIT_SILENCE_MS = 1200;
+  const USER_TURN_SPLIT_SILENCE_MS = 2200;
   const USER_SPEECH_STOP_FINALIZE_MS = 1600;
   const SPEECH_STOP_FORWARD_GRACE_MS = 1400;
   const STALE_ASR_GUARD_MS = 1500;
@@ -1230,6 +1235,34 @@ async function handleInterview(browserWs: WebSocket, ctx: InterviewContext) {
     log.info(`Interview complete (${reason})`);
   }
 
+  // ── ASR context for Volcengine deep reasoning ───────────────────────
+
+  function buildAsrContext(): Record<string, unknown> | undefined {
+    const contextData: { text: string }[] = [];
+
+    const currentQ = sortedQuestions[currentQuestionIndex];
+    if (currentQ) {
+      contextData.push({ text: `Interview topic: ${ctx.title}` });
+      contextData.push({
+        text: `Active question (${currentQuestionIndex + 1}/${sortedQuestions.length}): ${currentQ.text}`,
+      });
+    }
+
+    const recentHistory = conversationHistory.slice(-12);
+    for (const entry of recentHistory) {
+      const who = entry.role === "user" ? "Participant" : "Interviewer";
+      contextData.push({ text: `${who}: ${entry.text}` });
+    }
+
+    if (contextData.length === 0) return undefined;
+    return {
+      context: JSON.stringify({
+        context_type: "dialog_ctx",
+        context_data: contextData,
+      }),
+    };
+  }
+
   // ── Volcengine Big-Model streaming ASR ──────────────────────────────
   let volcWs: WebSocket | null = null;
   let volcAlive = false;
@@ -1253,10 +1286,13 @@ async function handleInterview(browserWs: WebSocket, ctx: InterviewContext) {
         channels: 1,
         codec: "raw",
         showUtterance: true,
-        resultType: "single",
+        resultType: "full",
         enablePunc: true,
-        endWindowSize: 500,
-        forceToSpeechTime: 1000,
+        endWindowSize: 800,
+        forceToSpeechTime: 3000,
+        enableNonstream: true,
+        ssdVersion: "200",
+        corpus: buildAsrContext(),
       };
 
       const wsHeaders = buildBigModelHeaders(VOLC_ASR_APPID, VOLC_ASR_TOKEN, reqid);

@@ -13,46 +13,39 @@ function readVoiceRelaySource(): string {
 }
 
 describe("server/voice-relay.ts reconnect & lifecycle (source checks)", () => {
-  it("defines Volcengine reconnect tuning constants", () => {
+  it("defines ASR reconnect tuning constants", () => {
     const src = readVoiceRelaySource();
-    assert.match(src, /const MAX_VOLC_RECONNECT_ATTEMPTS = 3;/);
-    assert.match(src, /const VOLC_RECONNECT_DELAY_MS = 1000;/);
+    assert.match(src, /const MAX_RECONNECT_ATTEMPTS = 3;/);
+    assert.match(src, /const RECONNECT_DELAY_MS = 1000;/);
   });
 
-  it("implements autoReconnectVolcengine and session reconnect events", () => {
+  it("implements autoReconnectAsr and session reconnect events", () => {
     const src = readVoiceRelaySource();
-    assert.match(src, /async function autoReconnectVolcengine\(\)/);
+    assert.match(src, /async function autoReconnectAsr\(\)/);
     assert.ok(src.includes('"session_reconnecting"'));
     assert.ok(src.includes('"session_reconnected"'));
   });
 
-  it("uses 2000ms keep-alive intervals for silence audio (not 5000ms)", () => {
+  it("uses 5000ms keep-alive intervals for silence audio", () => {
     const src = readVoiceRelaySource();
     const keepAliveIntervals = src.match(
-      /keepAliveInterval = setInterval\([\s\S]*?, 2000\);/g,
+      /keepAliveInterval = setInterval\([\s\S]*?, 5000\);/g,
     );
     assert.equal(
       keepAliveIntervals?.length,
-      3,
-      "mic test, post-reconnect, and main interview keep-alive intervals",
+      4,
+      "mic test, response-cycle reopen, post-reconnect, and main interview keep-alive intervals",
     );
-    for (const block of keepAliveIntervals ?? []) {
-      assert.equal(
-        /, 5000\)/.test(block),
-        false,
-        "each keep-alive block should end at 2000ms, not 5000ms",
-      );
-    }
   });
 
-  it("marks interviews done and detaches Volcengine listeners when the browser closes", () => {
+  it("marks interviews done and detaches ASR listeners when the browser closes", () => {
     const src = readVoiceRelaySource();
     assert.ok(
       src.includes(`browserWs.on("close", () => {
     log.info("Browser disconnected");
     interviewDone = true;`),
     );
-    assert.ok(src.includes("volcWs?.removeAllListeners();"));
+    assert.ok(src.includes("asrWs?.removeAllListeners();"));
   });
 
   it("installs a 10s safety timeout after farewell audio is queued", () => {

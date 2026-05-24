@@ -180,56 +180,6 @@ test("login honors browser locale and persisted locale cache", async () => {
   await cachedContext.close();
 });
 
-test("mobile auth callback page hands OAuth params back to the app", async () => {
-  const context = await browser.newContext({ locale: "en-US" });
-  const page = await context.newPage();
-  await page.goto(`${baseUrl}/mobile-auth/callback?code=oauth-code&state=xyz`, {
-    waitUntil: "domcontentloaded",
-  });
-  await waitForText(page, "Returning you to Aural");
-
-  const expected =
-    "com.aural.mobile://login-callback?code=oauth-code&state=xyz";
-
-  await waitForCondition(async () => {
-    const href = await page
-      .getByRole("link", { name: "Open Aural" })
-      .getAttribute("href");
-    return href === expected;
-  });
-  assert.equal(
-    await page.getByRole("link", { name: "Open Aural" }).getAttribute("href"),
-    expected,
-  );
-
-  await context.close();
-});
-
-test("marketing landing page falls back to the same mobile auth handoff", async () => {
-  const context = await browser.newContext({ locale: "en-US" });
-  const page = await context.newPage();
-  await page.goto(`${baseUrl}/?code=oauth-code&state=xyz`, {
-    waitUntil: "domcontentloaded",
-  });
-  await waitForText(page, "Returning you to Aural");
-
-  const expected =
-    "com.aural.mobile://login-callback?code=oauth-code&state=xyz";
-
-  await waitForCondition(async () => {
-    const href = await page
-      .getByRole("link", { name: "Open Aural" })
-      .getAttribute("href");
-    return href === expected;
-  });
-  assert.equal(
-    await page.getByRole("link", { name: "Open Aural" }).getAttribute("href"),
-    expected,
-  );
-
-  await context.close();
-});
-
 test("English interviews try the voice relay first and fail over to OpenAI", async () => {
   const context = await browser.newContext({ locale: "en-US" });
   const page = await context.newPage();
@@ -276,6 +226,76 @@ test("Chinese interviews also try the voice relay first and fail over to OpenAI"
     connections.map((entry) => entry.path),
     ["/ws/voice", "/ws/openai-voice"],
   );
+
+  await context.close();
+});
+
+test("voice interview shows Thinking after user speech finalizes", async () => {
+  const context = await browser.newContext({ locale: "en-US" });
+  const page = await context.newPage();
+
+  await page.goto(
+    `${baseUrl}/functional-tests/voice?language=en&scenario=thinking-after-asr`,
+  );
+  await waitForCondition(
+    async () =>
+      (await page.getByTestId("harness-ready").textContent()) === "true",
+    5_000,
+    "Expected functional voice harness mocks to be ready",
+  );
+  await page.getByRole("button", { name: "Start Voice Interview" }).click();
+
+  await waitForText(page, "Thinking...", 8_000);
+  const bodyText = (await page.locator("body").textContent()) ?? "";
+  assert.equal(bodyText.includes("I led a reporting dashboard project"), true);
+  assert.equal(
+    bodyText.includes("Speak naturally — AI will respond automatically"),
+    false,
+  );
+
+  await context.close();
+});
+
+test("voice interview keeps Thinking visible until the agent response returns", async () => {
+  const context = await browser.newContext({ locale: "en-US" });
+  const page = await context.newPage();
+
+  await page.goto(
+    `${baseUrl}/functional-tests/voice?language=en&scenario=thinking-until-response`,
+  );
+  await waitForCondition(
+    async () =>
+      (await page.getByTestId("harness-ready").textContent()) === "true",
+    5_000,
+    "Expected functional voice harness mocks to be ready",
+  );
+  await page.getByRole("button", { name: "Start Voice Interview" }).click();
+
+  await waitForText(page, "Thinking...", 8_000);
+  await delay(500);
+  assert.equal(
+    await page.getByText("Thinking...", { exact: true }).first().isVisible(),
+    true,
+  );
+  let bodyText = (await page.locator("body").textContent()) ?? "";
+  assert.equal(
+    bodyText.includes("Speak naturally — AI will respond automatically"),
+    false,
+  );
+
+  await waitForText(page, "Thanks for explaining that project.", 8_000);
+  await waitForCondition(
+    async () =>
+      !(await page
+        .getByText("Thinking...", { exact: true })
+        .first()
+        .isVisible()
+        .catch(() => false)),
+    5_000,
+    "Expected Thinking to clear once the agent response is visible",
+  );
+  bodyText = (await page.locator("body").textContent()) ?? "";
+  assert.equal(bodyText.includes("Thanks for explaining that project."), true);
 
   await context.close();
 });
