@@ -243,16 +243,6 @@ function resample16to24(input: Buffer): Buffer {
   return out;
 }
 
-/** Convert int16 LE PCM → float32 LE PCM (browser expects float32 at 24kHz) */
-function int16ToFloat32(buf: Buffer): Buffer {
-  const samples = buf.length / 2;
-  const out = Buffer.alloc(samples * 4);
-  for (let i = 0; i < samples; i++) {
-    out.writeFloatLE(buf.readInt16LE(i * 2) / 32768, i * 4);
-  }
-  return out;
-}
-
 // ── System prompt builder ───────────────────────────────────────────
 
 function buildSystemPrompt(ctx: InterviewContext, startIdx: number): string {
@@ -1519,9 +1509,8 @@ async function handleInterview(browserWs: WebSocket, ctx: InterviewContext) {
               }
               lastTtsAudioTime = Date.now();
               const int16Buf = Buffer.from(msg.delta, "base64");
-              const float32Buf = int16ToFloat32(int16Buf);
-              responseTtsBytes += float32Buf.length;
-              sendBinary(float32Buf);
+              responseTtsBytes += int16Buf.length;
+              sendBinary(int16Buf);
             } else if (isTransitioning && msg.delta) {
               log.warn("Audio suppressed: isTransitioning=true");
             }
