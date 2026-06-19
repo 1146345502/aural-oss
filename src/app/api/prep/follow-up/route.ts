@@ -117,7 +117,7 @@ export async function POST(req: Request) {
 
     const { data: question } = await supabaseAdmin
       .from("questions")
-      .select("id, text, description, type")
+      .select("id, text, description, type, options")
       .eq("id", attempt.questionId as string)
       .single();
     if (!question) {
@@ -144,6 +144,7 @@ export async function POST(req: Request) {
         text: question.text as string,
         description: question.description as string | null,
         type: question.type as string,
+        options: question.options,
       },
       initialAnswer: attempt.answerText as string,
       initialFeedbackSummary: initialFeedback.summary ?? "",

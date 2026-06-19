@@ -74,9 +74,8 @@ export async function GET(
   const page = hasMore ? list.slice(0, limit) : list;
 
   const data = page.map((row) => {
-    const msgs = row.messages as { id: string }[] | null;
-    const { messages: _messages, ...rest } = row;
-    void _messages;
+    const { messages, ...rest } = row;
+    const msgs = messages as { id: string }[] | null;
     return {
       ...rest,
       _count: { messages: msgs?.length ?? 0 },

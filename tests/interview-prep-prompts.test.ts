@@ -38,6 +38,34 @@ test("hint prompt grounds suggested answer in resume and JD", () => {
   assert.match(user, /Tell me about a frontend architecture decision\./);
 });
 
+test("hint prompt grounds choice answers in listed options", () => {
+  const messages = buildPrepHintPrompt({
+    interview: baseInterview,
+    question: {
+      text: "When working in a team, which approach is most effective?",
+      description: null,
+      type: "SINGLE_CHOICE",
+      options: {
+        options: [
+          "Establishing clear individual roles",
+          "Prioritizing open communication",
+          "Focusing on individual high-performance",
+        ],
+        allowMultiple: false,
+      },
+    },
+  });
+
+  const system = String(messages[0].content);
+  const user = String(messages[1].content);
+
+  assert.match(system, /choose only from the provided options/i);
+  assert.match(user, /Options:/);
+  assert.match(user, /A\. Establishing clear individual roles/);
+  assert.match(user, /B\. Prioritizing open communication/);
+  assert.match(user, /Choice rule: select exactly one/i);
+});
+
 test("feedback prompt omits voiceDelivery JSON when no audio or metrics", () => {
   const messages = buildPrepFeedbackPrompt({
     interview: baseInterview,

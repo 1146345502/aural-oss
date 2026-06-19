@@ -4,61 +4,61 @@
 import { useAppLocale } from "@/components/app-locale-provider";
 import { useProject } from "@/components/project-provider";
 import {
-    AlertDialog,
-    AlertDialogAction,
-    AlertDialogCancel,
-    AlertDialogContent,
-    AlertDialogDescription,
-    AlertDialogFooter,
-    AlertDialogHeader,
-    AlertDialogTitle,
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import {
-    Popover,
-    PopoverContent,
-    PopoverTrigger,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
 } from "@/components/ui/popover";
 import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { exportToXlsx } from "@/lib/export-xlsx";
 import { getSessionOverallScore } from "@/lib/session-score";
 import { trpc } from "@/lib/trpc/client";
 import {
-    ArrowDown,
-    ArrowUp,
-    ArrowUpDown,
-    Calendar,
-    Check,
-    ChevronLeft,
-    ChevronRight,
-    CircleDot,
-    Download,
-    ExternalLink,
-    GripVertical,
-    Loader2,
-    Search,
-    Settings,
-    Trash2,
-    X,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  Calendar,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  CircleDot,
+  Download,
+  ExternalLink,
+  GripVertical,
+  Loader2,
+  Search,
+  Settings,
+  Trash2,
+  X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -211,7 +211,6 @@ const DEFAULT_VISIBLE = new Set(
 /* ------------------------------------------------------------------ */
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50];
-
 
 function getTimeRangeCutoff(value: string): Date | null {
   const now = Date.now();
@@ -416,32 +415,38 @@ export default function CandidatesPage() {
     { value: "30d", label: isZh ? "过去 30 天" : "Past 30 days" },
     { value: "90d", label: isZh ? "过去 90 天" : "Past 90 days" },
   ];
-  const statusLabel = useCallback((status: string) => {
-    if (!isZh)
-      return status === "Not Started"
-        ? "NOT STARTED"
-        : status.replace("_", " ");
-    switch (status) {
-      case "COMPLETED":
-        return "已完成";
-      case "IN_PROGRESS":
-        return "进行中";
-      case "ABANDONED":
-        return "已放弃";
-      case "Not Started":
-        return "未开始";
-      default:
-        return status;
-    }
-  }, [isZh]);
-  const sourceLabel = useCallback((source: "walkin" | "candidate") =>
-    source === "walkin"
-      ? isZh
-        ? "现场"
-        : "Walk-in"
-      : isZh
-        ? "邀请"
-        : "Invited", [isZh]);
+  const statusLabel = useCallback(
+    (status: string) => {
+      if (!isZh)
+        return status === "Not Started"
+          ? "NOT STARTED"
+          : status.replace("_", " ");
+      switch (status) {
+        case "COMPLETED":
+          return "已完成";
+        case "IN_PROGRESS":
+          return "进行中";
+        case "ABANDONED":
+          return "已放弃";
+        case "Not Started":
+          return "未开始";
+        default:
+          return status;
+      }
+    },
+    [isZh],
+  );
+  const sourceLabel = useCallback(
+    (source: "walkin" | "candidate") =>
+      source === "walkin"
+        ? isZh
+          ? "现场"
+          : "Walk-in"
+        : isZh
+          ? "邀请"
+          : "Invited",
+    [isZh],
+  );
 
   // ── State ──
   const [searchQuery, setSearchQuery] = useState("");
@@ -601,12 +606,15 @@ export default function CandidatesPage() {
     }),
   );
 
+  const allRows = useMemo(
+    (): UnifiedRow[] => [...candidates, ...walkIns],
+    [candidates, walkIns],
+  );
   const isFiltering =
     searchQuery.trim() || statusFilter !== "ALL" || timeRange !== "ALL";
 
   // ── Filter + Sort ──
   const processedRows = useMemo(() => {
-    const allRows: UnifiedRow[] = [...candidates, ...walkIns];
     let result = allRows;
 
     if (searchQuery.trim()) {
@@ -649,7 +657,7 @@ export default function CandidatesPage() {
     }
 
     return result;
-  }, [candidates, walkIns, searchQuery, statusFilter, timeRange, sortKey, sortDir]);
+  }, [allRows, searchQuery, statusFilter, timeRange, sortKey, sortDir]);
 
   // ── Pagination ──
   const totalPages = Math.max(1, Math.ceil(processedRows.length / pageSize));

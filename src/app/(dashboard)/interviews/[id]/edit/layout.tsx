@@ -4,27 +4,20 @@ import { useAppLocale } from "@/components/app-locale-provider";
 import { ShareModal } from "@/components/interview/share-modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { trpc } from "@/lib/trpc/client";
 import { cn } from "@/lib/utils";
 import {
-  BrainCircuit,
-  ExternalLink,
-  Link2,
-  ListOrdered,
-  Loader2,
-  Lock,
-  Play,
-  Settings,
-  Share2,
-  Users,
+    BrainCircuit,
+    ExternalLink,
+    Link2,
+    ListOrdered,
+    Loader2,
+    Lock,
+    Settings,
+    Share2,
+    Users,
 } from "lucide-react";
 import { useParams, usePathname, useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
@@ -105,8 +98,7 @@ export default function EditInterviewLayout({
 
   const previewMutation = trpc.session.createPreview.useMutation({
     onSuccess: (data) => {
-      const slug = (interview.data as { publicSlug?: string | null } | undefined)?.publicSlug;
-      if (!slug) return;
+      const slug = (interview.data as any)?.publicSlug; // eslint-disable-line @typescript-eslint/no-explicit-any
       window.open(`/i/${slug}/session?sid=${data.sessionId}&preview=true`, "_blank");
     },
     onError: (err) => {
@@ -120,10 +112,6 @@ export default function EditInterviewLayout({
     if (pathname.endsWith("/prep")) return "prep";
     return "content";
   }, [pathname]);
-
-  const openPracticePreview = () => {
-    window.open(`/practice/${id}`, "_blank", "noopener,noreferrer");
-  };
 
   if (interview.isLoading) {
     return (
@@ -139,12 +127,6 @@ export default function EditInterviewLayout({
   }
 
   const data = interview.data;
-  const publicSlug = (data as { publicSlug?: string | null }).publicSlug ?? null;
-  const shareIsPublic = !!(
-    publicSlug &&
-    (data as { isActive?: boolean }).isActive &&
-    !(data as { requireInvite?: boolean }).requireInvite
-  );
 
   return (
     <EditInterviewProvider
@@ -164,37 +146,40 @@ export default function EditInterviewLayout({
                 <Share2 className="mr-2 h-3.5 w-3.5" />
                 {t("common.share")}
               </Button>
-              {publicSlug && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button size="sm" disabled={previewMutation.isPending}>
-                      {previewMutation.isPending ? (
-                        <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <ExternalLink className="mr-2 h-3.5 w-3.5" />
-                      )}
-                      {t("common.preview")}
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-52">
-                    <DropdownMenuItem
-                      onClick={() => {
-                        previewMutation.mutate({ interviewId: id });
-                      }}
-                    >
-                      <Users className="mr-2 h-4 w-4" />
-                      {t("interviewEdit.previewInterviewSession")}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={openPracticePreview}>
-                      <Play className="mr-2 h-4 w-4" />
-                      {t("interviewEdit.previewPracticeSession")}
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+              <Button
+                asChild
+                variant="outline"
+                size="sm"
+                className="gap-2 border-primary text-primary hover:bg-primary/5 hover:text-primary"
+              >
+                <a
+                  href={`/practice/${id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <BrainCircuit className="h-3.5 w-3.5" />
+                  {t("common.practice")}
+                </a>
+              </Button>
+              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+              {(data as any).publicSlug && (
+                <Button
+                  size="sm"
+                  className="gap-2"
+                  disabled={previewMutation.isPending}
+                  onClick={() => previewMutation.mutate({ interviewId: id })}
+                >
+                  {previewMutation.isPending ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  )}
+                  {t("interviewEdit.testAsCandidate")}
+                </Button>
               )}
             </div>
           </div>
-          <div className="mt-1 flex items-center gap-2">
+          <div className="flex items-center gap-2 mt-1">
             {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
             {(data as any).publicSlug && (data as any).isActive && !(data as any).requireInvite ? (
               <Badge
@@ -202,13 +187,15 @@ export default function EditInterviewLayout({
                 className="cursor-pointer gap-1 border-border bg-background text-foreground hover:bg-muted"
                 onClick={() => {
                   navigator.clipboard.writeText(
-                    `${window.location.origin}/i/${publicSlug}`,
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    `${window.location.origin}/i/${(data as any).publicSlug}`,
                   );
                   toast({ title: t("interviewEdit.linkCopied") });
                 }}
               >
                 <Link2 className="h-3 w-3" />
-                /i/{publicSlug}
+                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                /i/{(data as any).publicSlug}
               </Badge>
             ) : (
               <Badge variant="secondary" className="gap-1">
@@ -224,14 +211,6 @@ export default function EditInterviewLayout({
             {(data as any).videoEnabled && <Badge variant="outline">{t("dashboard.video")}</Badge>}
           </div>
         </div>
-
-        <ShareModal
-          open={shareOpen}
-          onOpenChange={setShareOpen}
-          interviewId={id}
-          publicSlug={publicSlug}
-          isPublic={shareIsPublic}
-        />
 
         {/* Tab navigation */}
         <div
@@ -270,6 +249,16 @@ export default function EditInterviewLayout({
         {/* Tab content */}
         {isPending && pendingTab ? tabSkeletons[pendingTab] : children}
       </div>
+
+      <ShareModal
+        open={shareOpen}
+        onOpenChange={setShareOpen}
+        interviewId={id}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        publicSlug={(data as any).publicSlug ?? null}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        isPublic={!!(data as any).publicSlug && (data as any).isActive && !(data as any).requireInvite}
+      />
     </EditInterviewProvider>
   );
 }

@@ -1,6 +1,14 @@
 /** Shared coaching criteria for suggested answers and live grading. */
 
-export type PrepStructureLabel = "STAR" | "PAR" | "Intro" | "Technical";
+export type PrepStructureLabel =
+  | "STAR"
+  | "PAR"
+  | "Intro"
+  | "Technical"
+  | "Service"
+  | "Knowledge"
+  | "Choice"
+  | "WrapUp";
 
 export function prepScoringRubricBlock(language: string): string {
   const isZh = language === "zh" || language.toLowerCase().startsWith("zh");
@@ -54,10 +62,15 @@ export function inferSuggestedAnswerStructure(
   text: string,
 ): PrepStructureLabel {
   const type = (questionType ?? "").toUpperCase();
+  if (type.includes("SINGLE_CHOICE") || type.includes("MULTIPLE_CHOICE")) {
+    return "Choice";
+  }
   if (
     type.includes("BEHAVIOR") ||
     type.includes("SITUATION") ||
-    /经历|案例|举例|STAR|当时|结果/.test(text)
+    /经历|案例|举例|STAR|当时|结果|tell me about a time|describe a situation|give an example|professional project|project where|time you/i.test(
+      text,
+    )
   ) {
     return "STAR";
   }
@@ -65,16 +78,41 @@ export function inferSuggestedAnswerStructure(
     type.includes("TECH") ||
     type.includes("SYSTEM") ||
     type.includes("DESIGN") ||
-    /方案|架构|权衡|trade.?off|implement/i.test(text)
+    /方案|架构|权衡|architecture|system design|trade.?off|implement/i.test(text)
   ) {
     return "PAR";
   }
   if (
+    type.includes("KNOWLEDGE") ||
+    /产品线|核心产品|熟悉.*产品|了解.*品牌|特点和适用人群|适用人群|说出至少|列举|知识|product line|product knowledge|key products|target customer/i.test(
+      text,
+    )
+  ) {
+    return "Knowledge";
+  }
+  if (
+    type.includes("ROLEPLAY") ||
+    type.includes("SERVICE") ||
+    /假设|如果遇到|当顾客|客户.*质疑|顾客.*质疑|顾客.*投诉|客户.*投诉|挖掘需求|建立信任|如何回应|如何处理|怎么与.*沟通|安抚|退货赔偿|过敏|customer|client|complaint|objection|skeptical|refund|allergy/i.test(
+      text,
+    )
+  ) {
+    return "Service";
+  }
+  if (
     type.includes("INTRO") ||
-    type.includes("OPEN") ||
-    /介绍|为什么|动机|why/i.test(text)
+    /自我介绍|介绍一下自己|简单介绍.*自己|tell me about yourself|introduce yourself|about yourself|walk me through your background|为什么.*(岗位|职位|公司|品牌|role|company)|动机|why/i.test(
+      text,
+    )
   ) {
     return "Intro";
+  }
+  if (
+    /anything else|haven't covered|not covered|would like to share|还有什么|补充|未覆盖|没.*覆盖/.test(
+      text,
+    )
+  ) {
+    return "WrapUp";
   }
   return "STAR";
 }
@@ -104,6 +142,26 @@ export function structureTagLabel(structure: PrepStructureLabel): {
       return {
         label: "Technical flow",
         hint: "Problem → approach → tradeoffs → outcome",
+      };
+    case "Service":
+      return {
+        label: "Service flow",
+        hint: "Acknowledge → probe → recommend/resolve",
+      };
+    case "Knowledge":
+      return {
+        label: "Knowledge map",
+        hint: "Category → features → fit",
+      };
+    case "Choice":
+      return {
+        label: "Choice rationale",
+        hint: "Pick → explain → qualify",
+      };
+    case "WrapUp":
+      return {
+        label: "Closing note",
+        hint: "Add signal → summarize fit → invite follow-up",
       };
     default:
       return {

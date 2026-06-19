@@ -17,6 +17,7 @@ export interface PrepQuestionContext {
   text: string;
   description?: string | null;
   type?: string | null;
+  options?: unknown;
 }
 
 export interface PrepVoiceMetricsInput {
@@ -53,6 +54,11 @@ export interface PrepHintInput {
   interview: PrepInterviewContext;
   question: PrepQuestionContext;
   responseLanguage?: string;
+  /** Rewrite a previous suggested answer following a user instruction. */
+  refinement?: {
+    instruction: string;
+    previousAnswer?: string | null;
+  };
 }
 
 export interface PrepFollowUpInput {
@@ -90,17 +96,68 @@ function contextBlock(interview: PrepInterviewContext): string {
 
 function questionBlock(question: PrepQuestionContext): string {
   const description = question.description?.trim();
+  const options = normalizeQuestionOptionLabels(question.options);
+  const type = (question.type || "OPEN_ENDED").toUpperCase();
+  const isChoice =
+    type.includes("SINGLE_CHOICE") || type.includes("MULTIPLE_CHOICE");
   return [
     `Question type: ${question.type || "OPEN_ENDED"}`,
     `Question: ${question.text}`,
+    isChoice && options.length
+      ? `Options:\n${options
+          .map(
+            (option, index) =>
+              `${String.fromCharCode(65 + index)}. ${option}`,
+          )
+          .join("\n")}`
+      : "",
+    isChoice
+      ? type.includes("MULTIPLE_CHOICE")
+        ? "Choice rule: select one or more of the listed options only; do not invent options."
+        : "Choice rule: select exactly one of the listed options only; do not invent options."
+      : "",
     description ? `Notes: ${description}` : "",
   ]
     .filter(Boolean)
     .join("\n");
 }
 
+function normalizeQuestionOptionLabels(value: unknown): string[] {
+  const rawOptions =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as { options?: unknown }).options
+      : value;
+
+  if (!Array.isArray(rawOptions)) return [];
+
+  return rawOptions
+    .map((item) => {
+      if (typeof item === "string") return item.trim();
+      if (!item || typeof item !== "object") return "";
+      const record = item as Record<string, unknown>;
+      if (typeof record.label === "string") return record.label.trim();
+      if (typeof record.text === "string") return record.text.trim();
+      if (typeof record.value === "string") return record.value.trim();
+      return "";
+    })
+    .filter(Boolean);
+}
+
 export function buildPrepHintPrompt(input: PrepHintInput): LLMMessage[] {
   const lang = input.responseLanguage || input.interview.language;
+  const refinement = input.refinement?.instruction?.trim();
+
+  const refinementBlock = refinement
+    ? `
+
+PREVIOUS SUGGESTED ANSWER:
+${input.refinement?.previousAnswer?.trim() || "(not available — write a fresh answer)"}
+
+REQUESTED CHANGE: ${refinement}
+
+Rewrite the suggested answer applying the requested change. Keep it grounded in the resume and JD facts, keep the same output format, and do not invent new facts.`
+    : "";
+
   return [
     {
       role: "system",
@@ -112,7 +169,14 @@ ${prepSampleAnswerRulesBlock(lang)}
 
 - Write ONE cohesive answer: do not repeat the opening line, greeting, or name twice.
 - Start once with a natural opener, then 2-3 short paragraphs.
-- Output PLAIN TEXT only — no JSON, no headings, no markdown, no reasoning preamble.
+- For choice questions, choose only from the provided options. For SINGLE_CHOICE choose exactly one; for MULTIPLE_CHOICE choose one or more. Name the selected option(s) in the answer and explain the rationale.
+- Output PLAIN TEXT only — no JSON, no markdown, no reasoning preamble.
+
+Output format — exactly two sections, keeping the literal English markers "OUTLINE:" and "ANSWER:" on their own lines (markers stay in English even when the answer is in another language):
+OUTLINE:
+- 3-5 bullets, each 8 words or fewer, sketching the structure of the answer
+ANSWER:
+The full sample answer (natural opener, then 2-3 short paragraphs).
 
 ${languageInstruction(lang, "sample answer")}`,
     },
@@ -120,7 +184,7 @@ ${languageInstruction(lang, "sample answer")}`,
       role: "user",
       content: `${contextBlock(input.interview)}
 
-${questionBlock(input.question)}`,
+${questionBlock(input.question)}${refinementBlock}`,
     },
   ];
 }

@@ -9,6 +9,7 @@ import {
     streamHeaders,
     stripThinkBlocks,
 } from "@/app/api/prep/_lib";
+import type { PrepVoiceTimelineSegment } from "@/components/prep/prep-types";
 import { isAbortError } from "@/lib/abort-error";
 import { extractJson } from "@/lib/ai/extract-json";
 import { resolveGeneratorModel, streamGeneratorWithFallback } from "@/lib/ai/generator-run";
@@ -62,6 +63,18 @@ type VoiceMetricsBody = {
   clarity?: number;
   tone?: number;
   tips?: string[];
+  timeline?: Array<{
+    startSec?: number;
+    endSec?: number;
+    energy?: number;
+    wpm?: number | null;
+    pause?: boolean;
+    fillers?: number;
+    lowConfidence?: boolean;
+  }>;
+  pauseCount?: number;
+  longestPauseSec?: number;
+  fillerCount?: number;
 };
 
 function asStringArray(value: unknown): string[] {
@@ -74,6 +87,32 @@ function clampScore(value: unknown, fallback = 5): number {
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
   return Math.min(10, Math.max(1, n));
+}
+
+const MAX_TIMELINE_SEGMENTS = 32;
+
+function finiteOrZero(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Validate client-computed timeline segments before persisting them. */
+function sanitizeTimeline(
+  timeline: VoiceMetricsBody["timeline"],
+): PrepVoiceTimelineSegment[] {
+  if (!Array.isArray(timeline)) return [];
+  return timeline.slice(0, MAX_TIMELINE_SEGMENTS).map((segment) => ({
+    startSec: Math.max(0, finiteOrZero(segment?.startSec)),
+    endSec: Math.max(0, finiteOrZero(segment?.endSec)),
+    energy: Math.min(1, Math.max(0, finiteOrZero(segment?.energy))),
+    wpm:
+      segment?.wpm == null
+        ? null
+        : Math.min(500, Math.max(0, Math.round(finiteOrZero(segment.wpm)))),
+    pause: Boolean(segment?.pause),
+    fillers: Math.min(99, Math.max(0, Math.round(finiteOrZero(segment?.fillers)))),
+    lowConfidence: Boolean(segment?.lowConfidence),
+  }));
 }
 
 function normalizeVoiceDelivery(raw?: RawVoiceDelivery) {
@@ -119,6 +158,7 @@ function mergeVoiceMetrics(
   metrics?: VoiceMetricsBody,
 ) {
   if (!metrics) return feedback;
+  const timeline = sanitizeTimeline(metrics.timeline);
   const delivery = voiceMetricsToFeedback({
     durationSeconds: metrics.durationSeconds ?? 0,
     wordsPerMinute: metrics.wordsPerMinute ?? 0,
@@ -126,13 +166,26 @@ function mergeVoiceMetrics(
     clarity: clampScore(metrics.clarity, 5),
     tone: clampScore(metrics.tone, 5),
     tips: asStringArray(metrics.tips),
+    timeline,
+    pauseCount: Math.max(0, Math.round(finiteOrZero(metrics.pauseCount))),
+    longestPauseSec: Math.max(0, finiteOrZero(metrics.longestPauseSec)),
+    fillerCount: Math.max(0, Math.round(finiteOrZero(metrics.fillerCount))),
   });
   const extraImprovements = delivery.tips.filter(
     (t) => !feedback.improvements.includes(t),
   );
+  // LLM grades take priority for scores, but the timeline/pause/filler stats are
+  // heuristic-only — always attach them from the client metrics.
+  const baseDelivery = feedback.voiceDelivery ?? delivery;
   return {
     ...feedback,
-    voiceDelivery: feedback.voiceDelivery ?? delivery,
+    voiceDelivery: {
+      ...baseDelivery,
+      timeline: delivery.timeline,
+      pauseCount: delivery.pauseCount,
+      longestPauseSec: delivery.longestPauseSec,
+      fillerCount: delivery.fillerCount,
+    },
     improvements: [...feedback.improvements, ...extraImprovements].slice(0, 5),
   };
 }
@@ -244,9 +297,9 @@ export async function POST(req: Request) {
       interview.language as string,
       trimmedAnswer,
     );
-    const skipLlm =
-      isNonSubstantiveAnswer(trimmedAnswer) ||
-      isMetaPromptOrUiPlaceholderAnswer(trimmedAnswer);
+    const nonSubstantiveAnswer = isNonSubstantiveAnswer(trimmedAnswer);
+    const metaPromptAnswer = isMetaPromptOrUiPlaceholderAnswer(trimmedAnswer);
+    const skipLlm = nonSubstantiveAnswer || metaPromptAnswer;
 
     const hasVoiceAnswer = Boolean(
       (practiceMode && answerAudio) || voiceMetrics,
@@ -266,6 +319,7 @@ export async function POST(req: Request) {
         text: question.text as string,
         description: question.description as string | null,
         type: question.type as string,
+        options: question.options,
       },
       answerText: trimmedAnswer,
       responseLanguage,
@@ -303,6 +357,8 @@ export async function POST(req: Request) {
       model: feedbackModel,
       hasVoiceAnswer,
       skipLlm,
+      nonSubstantiveAnswer,
+      metaPromptAnswer,
       messageCount: messages.length,
     });
 

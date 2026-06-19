@@ -2,28 +2,40 @@
 
 import { AiGlowBorder } from "@/components/ui/ai-glow-border";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
-import { ChatComposer } from "@/components/ui/chat-composer";
+import { Button } from "@/components/ui/button";
 import {
-  CoachSpeakingWave,
-  type CoachSpeakingPhase,
+    ChatComposer,
+    type ChatComposerControl,
+} from "@/components/ui/chat-composer";
+import {
+    CoachSpeakingWave,
+    type CoachSpeakingPhase,
 } from "@/components/ui/coach-speaking-wave";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+    Sheet,
+    SheetContent,
+    SheetHeader,
+    SheetTitle,
+    SheetTrigger,
+} from "@/components/ui/sheet";
 import { StreamingTextPanels } from "@/components/ui/streaming-text-panels";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
+    Tooltip,
+    TooltipContent,
+    TooltipProvider,
+    TooltipTrigger,
 } from "@/components/ui/tooltip";
 import type { PrepVoiceRecording } from "@/hooks/use-prep-voice-capture";
 import { useToast } from "@/hooks/use-toast";
@@ -34,56 +46,169 @@ import { formatPrepAudioDuration, resolveBlobDuration } from "@/lib/prep/answer-
 import { resolvePrepResponseLanguage } from "@/lib/prep/answer-quality";
 import { prepareCoachTtsText } from "@/lib/prep/coach-tts-text";
 import {
-  abortPrepFeedbackDiag,
-  finishPrepFeedbackDiag,
-  getPrepFeedbackDiagTraceId,
-  markPrepFeedbackDiag,
-  markRecordingComplete,
-  startPrepFeedbackDiag,
+    abortPrepFeedbackDiag,
+    finishPrepFeedbackDiag,
+    getPrepFeedbackDiagTraceId,
+    markPrepFeedbackDiag,
+    markRecordingComplete,
+    startPrepFeedbackDiag,
 } from "@/lib/prep/feedback-latency-diag";
 import {
-  hasPartialFeedbackHeader,
-  parsePartialPrepFeedback,
+    hasPartialFeedbackHeader,
+    parsePartialPrepFeedback,
 } from "@/lib/prep/parse-partial-feedback-json";
+import {
+    clearPracticeDraft,
+    loadPracticeDraft,
+    savePracticeDraft,
+} from "@/lib/prep/practice-drafts";
 import { buildPracticeResumeState } from "@/lib/prep/practice-resume-state";
 import {
-  buildVoiceDeliveryMetrics,
-  type VoiceDeliveryMetrics,
+    buildVoiceDeliveryMetrics,
+    type VoiceDeliveryMetrics,
 } from "@/lib/prep/voice-delivery";
+import { trpc } from "@/lib/trpc/client";
 import { cn } from "@/lib/utils";
 import {
-  CheckCircle2,
-  Info,
-  Loader2,
-  MessageSquareText,
-  Mic,
-  Sparkles,
-  Target,
-  Timer,
-  TrendingUp,
-  Waves,
+    Bookmark,
+    BookmarkCheck,
+    CheckCircle2,
+    ChevronLeft,
+    ChevronRight,
+    Info,
+    ListOrdered,
+    Loader2,
+    MessageSquareText,
+    Mic,
+    Sparkles,
+    Target,
+    Timer,
+    TrendingUp,
+    Waves,
+    X,
 } from "lucide-react";
 import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
+    useCallback,
+    useEffect,
+    useLayoutEffect,
+    useMemo,
+    useRef,
+    useState,
+    type ReactNode,
 } from "react";
+import { AnswerTargetChips } from "./practice-answer-targets";
+import {
+    NextActionStrip,
+    NextBestMoveBar,
+    SampleAnswerDialog,
+    type PracticeNextAction,
+} from "./practice-next-move";
+import {
+    PRACTICE_RETRY_SCORE_BAR,
+    PracticeQuestionNavigator,
+    type PracticeQuestionStatus,
+} from "./practice-question-navigator";
+import {
+    PracticeTourHelpButton,
+    PracticeTourOverlay,
+    PracticeTourProvider,
+} from "./practice-tour";
+import { PrepContextDrawer } from "./prep-context-drawer";
 import { readPrepStream } from "./prep-stream";
 import {
-  PrepSuggestedAnswerPanel,
-  type PrepContextInitial,
+    PrepSuggestedAnswerPanel,
+    type PrepContextInitial,
 } from "./prep-suggested-answer-panel";
 import {
-  EMPTY_FEEDBACK,
-  scoreTone,
-  type PrepAttempt,
-  type PrepFeedback,
-  type PrepQuestion,
+    EMPTY_FEEDBACK,
+    normalizePrepQuestionOptions,
+    scoreTone,
+    type PrepAttempt,
+    type PrepFeedback,
+    type PrepQuestion,
+    type PrepQuestionOption,
 } from "./prep-types";
+import { VoiceDeliveryTimeline } from "./voice-delivery-timeline";
+
+const NAV_WIDTH_MIN = 200;
+const NAV_WIDTH_MAX = 380;
+const NAV_WIDTH_DEFAULT = 240;
+const CHAT_PANEL_MIN_PX = 400;
+const RIGHT_PANEL_MIN_PX = 300;
+const PANEL_DIVIDER_PX = 4;
+const COLLAPSED_RAIL_PX = 36;
+
+function PanelResizeDivider({
+  onPointerDown,
+  ariaLabel,
+}: {
+  onPointerDown: (e: React.PointerEvent) => void;
+  ariaLabel: string;
+}) {
+  return (
+    <div
+      className="group flex w-1 shrink-0 cursor-col-resize touch-none items-center justify-center border-l border-r border-border bg-muted/30 transition-colors hover:bg-primary/10 active:bg-primary/20"
+      onPointerDown={onPointerDown}
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={ariaLabel}
+    />
+  );
+}
+
+function CollapsedPanelRail({
+  side,
+  label,
+  meta,
+  onClick,
+  ariaLabel,
+}: {
+  side: "left" | "right";
+  label: string;
+  meta?: string;
+  onClick: () => void;
+  ariaLabel: string;
+}) {
+  const ExpandIcon = side === "left" ? ChevronRight : ChevronLeft;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          onClick={onClick}
+          aria-label={ariaLabel}
+          className={cn(
+            "group/rail flex w-9 shrink-0 flex-col items-center gap-4 py-3.5 text-muted-foreground/70 transition-colors hover:text-foreground",
+            side === "left" ? "border-r" : "border-l",
+          )}
+        >
+          <ExpandIcon
+            className="h-3.5 w-3.5 shrink-0 opacity-60 transition-opacity group-hover/rail:opacity-100"
+            aria-hidden
+          />
+
+          <span className="flex flex-1 items-center justify-center">
+            <span className="text-[11px] font-medium uppercase tracking-[0.2em] [writing-mode:vertical-rl]">
+              {label}
+            </span>
+          </span>
+
+          {meta ? (
+            <span className="text-[10px] font-medium tabular-nums opacity-60">
+              {meta}
+            </span>
+          ) : null}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent
+        side={side === "left" ? "right" : "left"}
+        className="text-xs"
+      >
+        {ariaLabel}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
 
 type Mode = "TEXT" | "VOICE";
 type Phase = "idle" | "thinking" | "writing" | "finalizing";
@@ -110,6 +235,7 @@ type ChatMessage =
       content: string;
       questionIndex?: number;
       questionType?: string;
+      questionOptions?: PrepQuestionOption[];
     }
   | {
       id: string;
@@ -130,6 +256,10 @@ type ChatMessage =
       phase?: Phase;
       thinkingText?: string;
       streamingText?: string;
+      questionIndex?: number;
+      questionId?: string;
+      attemptId?: string;
+      answerText?: string;
     }
   | {
       id: string;
@@ -188,6 +318,7 @@ function questionMessage(question: PrepQuestion, index: number): ChatMessage {
     content: question.text,
     questionIndex: index,
     questionType: question.type || "OPEN_ENDED",
+    questionOptions: normalizePrepQuestionOptions(question.options),
   };
 }
 
@@ -211,10 +342,11 @@ export function PracticeSessionChat({
   prepContext,
   onPrepContextSaved,
   questions,
+  initialQuestionId = null,
   mode,
   remainingSeconds,
   attempts,
-  planTier = "Self-hosted",
+  planTier = "Free",
   mediaRetentionDays = 7,
   onAttemptCreated,
   onFinish,
@@ -228,6 +360,8 @@ export function PracticeSessionChat({
   prepContext: PrepContextInitial;
   onPrepContextSaved?: () => void;
   questions: PrepQuestion[];
+  /** Question to open first when starting a fresh session (e.g. from the answer bank). */
+  initialQuestionId?: string | null;
   mode: Mode;
   remainingSeconds: number | null;
   attempts: PrepAttempt[];
@@ -256,9 +390,20 @@ export function PracticeSessionChat({
 
   const [questionIndex, setQuestionIndex] = useState(0);
   const [awaitingRetry, setAwaitingRetry] = useState(false);
-  const [splitPercent, setSplitPercent] = useState(62);
+  const [splitPercent, setSplitPercent] = useState(55);
+  const [navPanelOpen, setNavPanelOpen] = useState(true);
+  const [navWidth, setNavWidth] = useState(NAV_WIDTH_DEFAULT);
+  const [rightPanelOpen, setRightPanelOpen] = useState(true);
   const splitDragging = useRef(false);
+  const navSplitDragging = useRef(false);
   const splitContainerRef = useRef<HTMLDivElement>(null);
+  /** Chat + suggested-answer row; split % is relative to this width. */
+  const chatRightContainerRef = useRef<HTMLDivElement>(null);
+  /** Floating composer + next-move overlays; measured to pad the chat scroll. */
+  const desktopOverlayRef = useRef<HTMLDivElement>(null);
+  const mobileOverlayRef = useRef<HTMLDivElement>(null);
+  const [desktopChatPadding, setDesktopChatPadding] = useState(160);
+  const [mobileChatPadding, setMobileChatPadding] = useState(160);
   const responseLanguageRef = useRef(language);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [activePrompt, setActivePrompt] = useState<ActivePrompt | null>(null);
@@ -274,6 +419,78 @@ export function PracticeSessionChat({
   const [submitting, setSubmitting] = useState(false);
   const [coachMuted, setCoachMuted] = useState(false);
   const [finishDialogOpen, setFinishDialogOpen] = useState(false);
+  const [navSheetOpen, setNavSheetOpen] = useState(false);
+  /** Suggested answer the user is rehearsing as a speaking drill. */
+  const [drillScript, setDrillScript] = useState<string | null>(null);
+  const [sampleDialog, setSampleDialog] = useState<{
+    open: boolean;
+    sampleAnswer: string;
+    questionText?: string;
+  }>({ open: false, sampleAnswer: "" });
+  /** Feedback message id whose sticky next-move bar was dismissed. */
+  const [nextMoveDismissedId, setNextMoveDismissedId] = useState<string | null>(
+    null,
+  );
+  const [proofDrawerOpen, setProofDrawerOpen] = useState(false);
+  const desktopComposerControl = useRef<ChatComposerControl | null>(null);
+  const mobileComposerControl = useRef<ChatComposerControl | null>(null);
+  const trpcUtils = trpc.useUtils();
+  const bookmarkedIdsQuery = trpc.answerBank.listAttemptIds.useQuery(
+    { interviewId },
+    { staleTime: 30_000 },
+  );
+  const bookmarkedAttemptIds = useMemo(
+    () => new Set(bookmarkedIdsQuery.data ?? []),
+    [bookmarkedIdsQuery.data],
+  );
+  const toggleBookmark = trpc.answerBank.toggle.useMutation({
+    onSuccess: (result) => {
+      void trpcUtils.answerBank.listAttemptIds.invalidate();
+      void trpcUtils.answerBank.list.invalidate();
+      toast({
+        title: result.bookmarked
+          ? "Saved to your answer bank"
+          : "Removed from your answer bank",
+      });
+    },
+    onError: (err) => {
+      toast({
+        title: "Could not update answer bank",
+        description: err.message,
+        variant: "destructive",
+      });
+    },
+  });
+  const previewMutation = trpc.session.createPreview.useMutation({
+    onSuccess: (data, variables) => {
+      if (!data.slug) {
+        toast({
+          title: "Could not open preview",
+          description: "Publish the interview before opening a preview session.",
+          variant: "destructive",
+        });
+        return;
+      }
+      const params = new URLSearchParams({
+        sid: data.sessionId,
+        preview: "true",
+      });
+      if (variables.questionId) params.set("question", variables.questionId);
+      window.open(
+        `/i/${data.slug}/session?${params.toString()}`,
+        "_blank",
+        "noopener,noreferrer",
+      );
+    },
+    onError: (err) => {
+      toast({
+        title: "Could not open preview",
+        description: err.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   const {
     speak: speakCoach,
     stop: stopCoach,
@@ -607,6 +824,15 @@ export function PracticeSessionChat({
   const sessionInitRef = useRef<string | null>(null);
   const sessionSpeakRef = useRef<string | null>(null);
 
+  /** Index of the question a fresh session should open with. */
+  const initialQuestionIndex = useMemo(() => {
+    if (!initialQuestionId) return 0;
+    const index = questions.findIndex(
+      (question) => question.id === initialQuestionId,
+    );
+    return index >= 0 ? index : 0;
+  }, [initialQuestionId, questions]);
+
   useEffect(() => {
     if (questions.length === 0 || !sessionId) return;
 
@@ -626,26 +852,33 @@ export function PracticeSessionChat({
         setAwaitingRetry(resumeState.awaitingRetry);
         setPinnedQuestionIndex(resumeState.pinnedQuestionIndex);
         setPinnedMessageId(resumeState.pinnedMessageId);
+        const resumedQuestion = questions[resumeState.questionIndex];
+        if (resumedQuestion) {
+          setDraft(
+            loadPracticeDraft(sessionId, resumedQuestion.id) ?? "",
+          );
+        }
         promptStartedAtRef.current = Date.now();
         sessionSpeakRef.current = sessionId;
         return;
       }
 
-      const firstQuestion = questions[0];
-      setQuestionIndex(0);
+      const firstQuestion = questions[initialQuestionIndex];
+      setQuestionIndex(initialQuestionIndex);
       setAwaitingRetry(false);
-      setMessages([questionMessage(firstQuestion, 0)]);
+      setMessages([questionMessage(firstQuestion, initialQuestionIndex)]);
       setActivePrompt({
         kind: "question",
         questionId: firstQuestion.id,
-        questionIndex: 0,
+        questionIndex: initialQuestionIndex,
         prompt: firstQuestion.text,
       });
+      setDraft(loadPracticeDraft(sessionId, firstQuestion.id) ?? "");
       promptStartedAtRef.current = Date.now();
-      setPinnedQuestionIndex(0);
+      setPinnedQuestionIndex(initialQuestionIndex);
       setPinnedMessageId(null);
     }
-  }, [attempts, questions, sessionId]);
+  }, [attempts, initialQuestionIndex, questions, sessionId]);
 
   useEffect(() => {
     if (
@@ -659,7 +892,7 @@ export function PracticeSessionChat({
     }
     if (sessionSpeakRef.current === sessionId) return;
 
-    const firstQuestion = questions[0];
+    const firstQuestion = questions[initialQuestionIndex];
     if (!firstQuestion?.text.trim()) return;
 
     let cancelled = false;
@@ -671,7 +904,8 @@ export function PracticeSessionChat({
       speakCoachTextRef.current(firstQuestion.text, "question");
     };
 
-    // Wait for layout/paint so the session UI is on screen, then auto-read Q1.
+    // Wait for layout/paint so the session UI is on screen, then auto-read
+    // the starting question.
     const raf1 = requestAnimationFrame(() => {
       raf2 = requestAnimationFrame(speakFirstQuestion);
     });
@@ -681,7 +915,14 @@ export function PracticeSessionChat({
       cancelAnimationFrame(raf1);
       cancelAnimationFrame(raf2);
     };
-  }, [coachMuted, coachQuestionsBlocked, mode, questions, sessionId]);
+  }, [
+    coachMuted,
+    coachQuestionsBlocked,
+    initialQuestionIndex,
+    mode,
+    questions,
+    sessionId,
+  ]);
 
   useEffect(() => {
     if (mode !== "VOICE" || coachMuted) return;
@@ -758,7 +999,7 @@ export function PracticeSessionChat({
     });
   };
 
-  const ensureQuestionInThread = (index: number) => {
+  const ensureQuestionInThread = useCallback((index: number) => {
     setMessages((prev) => {
       const exists = prev.some(
         (message) =>
@@ -769,17 +1010,23 @@ export function PracticeSessionChat({
       if (!question) return prev;
       return [...prev, questionMessage(question, index)];
     });
-  };
+  }, [questions]);
 
-  const navigateToQuestion = (index: number) => {
+  const navigateToQuestion = useCallback((index: number) => {
     if (index < 0 || index >= questions.length || submitting) return;
     const question = questions[index];
     if (!question) return;
 
+    // Keep unsent work: stash the current draft before switching questions.
+    if (activePrompt && draftRef.current.trim()) {
+      savePracticeDraft(sessionId, activePrompt.questionId, draftRef.current);
+    }
+
     stopGeneration();
     setQuestionIndex(index);
-    setDraft("");
+    setDraft(loadPracticeDraft(sessionId, question.id) ?? "");
     setAwaitingRetry(false);
+    setDrillScript(null);
     clearPendingAudio();
     ensureQuestionInThread(index);
     setActivePrompt({
@@ -792,7 +1039,15 @@ export function PracticeSessionChat({
     setPinnedMessageId(null);
     setPinnedQuestionIndex(index);
     speakQuestionWithGesture(question.text);
-  };
+  }, [
+    activePrompt,
+    clearPendingAudio,
+    ensureQuestionInThread,
+    questions,
+    sessionId,
+    speakQuestionWithGesture,
+    submitting,
+  ]);
 
   const submitQuestionAnswer = async (
     prompt: Extract<ActivePrompt, { kind: "question" }>,
@@ -806,7 +1061,10 @@ export function PracticeSessionChat({
     let streamingAccumulator = "";
     let feedbackFinalHandled = false;
 
-    const finishFeedbackFromServer = (rawFeedback: PrepFeedback) => {
+    const finishFeedbackFromServer = (
+      rawFeedback: PrepFeedback,
+      attemptId?: string,
+    ) => {
       if (feedbackFinalHandled) return;
       feedbackFinalHandled = true;
       const feedback = normalizeFeedback(rawFeedback);
@@ -816,6 +1074,7 @@ export function PracticeSessionChat({
         phase: "idle",
         thinkingText: undefined,
         streamingText: undefined,
+        attemptId,
       } as Partial<ChatMessage>);
       markPrepFeedbackDiag("final_sse_received");
       onAttemptCreated();
@@ -847,6 +1106,9 @@ export function PracticeSessionChat({
         phase: "thinking",
         thinkingText: "",
         streamingText: "",
+        questionIndex: prompt.questionIndex,
+        questionId: prompt.questionId,
+        answerText,
       },
     ]);
     markPrepFeedbackDiag("feedback_card_shown");
@@ -878,6 +1140,10 @@ export function PracticeSessionChat({
               clarity: voiceMetrics.clarity,
               tone: voiceMetrics.tone,
               tips: voiceMetrics.tips,
+              timeline: voiceMetrics.timeline,
+              pauseCount: voiceMetrics.pauseCount,
+              longestPauseSec: voiceMetrics.longestPauseSec,
+              fillerCount: voiceMetrics.fillerCount,
             }
           : undefined,
         answerAudioMimeType: answerAudioBlob?.type || "audio/webm",
@@ -944,7 +1210,7 @@ export function PracticeSessionChat({
           onFirstToken: () => markPrepFeedbackDiag("first_content_token"),
           onFinal: (payload) => {
             if (payload.feedback) {
-              finishFeedbackFromServer(payload.feedback);
+              finishFeedbackFromServer(payload.feedback, payload.attemptId);
             }
           },
           onPersistWarning: (message) => {
@@ -1016,7 +1282,7 @@ export function PracticeSessionChat({
       if (!final?.feedback) {
         throw new Error("Feedback stream ended without a final payload");
       }
-      finishFeedbackFromServer(final.feedback);
+      finishFeedbackFromServer(final.feedback, final.attemptId);
     }
 
     finishPrepFeedbackDiag({
@@ -1027,7 +1293,7 @@ export function PracticeSessionChat({
   const submitDraft = async (ctx?: { recording?: PrepVoiceRecording | null }) => {
     const answerText = draft.trim();
     if (!activePrompt || submitting) return;
-    if (answerText.length < 8) return;
+    if (!answerText) return;
 
     setSubmitting(true);
     setPinnedQuestionIndex(null);
@@ -1060,6 +1326,8 @@ export function PracticeSessionChat({
       markPrepFeedbackDiag("metrics_done");
     }
     setDraft("");
+    setDrillScript(null);
+    clearPracticeDraft(sessionId, activePrompt.questionId);
     setPendingAudio((prev) => {
       if (prev?.url) URL.revokeObjectURL(prev.url);
       return null;
@@ -1102,16 +1370,64 @@ export function PracticeSessionChat({
     }
   };
 
+  const handleNavSplitPointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      e.preventDefault();
+      const target = e.currentTarget as HTMLElement;
+      target.setPointerCapture?.(e.pointerId);
+      navSplitDragging.current = true;
+      const onPointerMove = (ev: PointerEvent) => {
+        if (!navSplitDragging.current || !splitContainerRef.current) return;
+        const rect = splitContainerRef.current.getBoundingClientRect();
+        // Reserve space so the chat panel (and the suggested panel when open)
+        // never drop below their minimums when the nav panel expands.
+        const rightReserve = rightPanelOpen
+          ? PANEL_DIVIDER_PX + RIGHT_PANEL_MIN_PX
+          : COLLAPSED_RAIL_PX;
+        const navMax = Math.max(
+          NAV_WIDTH_MIN,
+          Math.min(
+            NAV_WIDTH_MAX,
+            rect.width - PANEL_DIVIDER_PX - CHAT_PANEL_MIN_PX - rightReserve,
+          ),
+        );
+        const width = ev.clientX - rect.left;
+        setNavWidth(Math.min(Math.max(width, NAV_WIDTH_MIN), navMax));
+      };
+      const onPointerUp = () => {
+        navSplitDragging.current = false;
+        target.releasePointerCapture?.(e.pointerId);
+        document.removeEventListener("pointermove", onPointerMove);
+        document.removeEventListener("pointerup", onPointerUp);
+      };
+      document.addEventListener("pointermove", onPointerMove);
+      document.addEventListener("pointerup", onPointerUp);
+    },
+    [rightPanelOpen],
+  );
+
   const handleSplitPointerDown = useCallback((e: React.PointerEvent) => {
     e.preventDefault();
     const target = e.currentTarget as HTMLElement;
     target.setPointerCapture?.(e.pointerId);
     splitDragging.current = true;
+    const startX = e.clientX;
+    let moved = false;
+
     const onPointerMove = (ev: PointerEvent) => {
-      if (!splitDragging.current || !splitContainerRef.current) return;
-      const rect = splitContainerRef.current.getBoundingClientRect();
-      const pct = ((ev.clientX - rect.left) / rect.width) * 100;
-      setSplitPercent(Math.min(Math.max(pct, 35), 78));
+      if (!splitDragging.current || !chatRightContainerRef.current) return;
+      if (!moved && Math.abs(ev.clientX - startX) < 2) return;
+      moved = true;
+
+      const rect = chatRightContainerRef.current.getBoundingClientRect();
+      const maxChatWidth =
+        rect.width - RIGHT_PANEL_MIN_PX - PANEL_DIVIDER_PX;
+      const chatWidth = Math.min(
+        Math.max(ev.clientX - rect.left, CHAT_PANEL_MIN_PX),
+        maxChatWidth,
+      );
+      const pct = (chatWidth / rect.width) * 100;
+      setSplitPercent(pct);
     };
     const onPointerUp = () => {
       splitDragging.current = false;
@@ -1122,6 +1438,249 @@ export function PracticeSessionChat({
     document.addEventListener("pointermove", onPointerMove);
     document.addEventListener("pointerup", onPointerUp);
   }, []);
+
+  // Keep the nav panel within bounds when the window shrinks, so the chat and
+  // suggested panels never get pushed below their minimum widths.
+  useEffect(() => {
+    const clampNavWidth = () => {
+      const el = splitContainerRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0) return;
+      const rightReserve = rightPanelOpen
+        ? PANEL_DIVIDER_PX + RIGHT_PANEL_MIN_PX
+        : COLLAPSED_RAIL_PX;
+      const navMax = Math.max(
+        NAV_WIDTH_MIN,
+        Math.min(
+          NAV_WIDTH_MAX,
+          rect.width - PANEL_DIVIDER_PX - CHAT_PANEL_MIN_PX - rightReserve,
+        ),
+      );
+      setNavWidth((width) => Math.min(width, navMax));
+    };
+    clampNavWidth();
+    window.addEventListener("resize", clampNavWidth);
+    return () => window.removeEventListener("resize", clampNavWidth);
+  }, [rightPanelOpen]);
+
+  // Measure the floating composer/next-move overlay so the chat scroll reserves
+  // exactly enough bottom space — the action badges under the latest feedback
+  // card stay fully visible instead of hiding behind the overlay.
+  useEffect(() => {
+    const pairs: Array<[HTMLDivElement | null, (value: number) => void]> = [
+      [desktopOverlayRef.current, setDesktopChatPadding],
+      [mobileOverlayRef.current, setMobileChatPadding],
+    ];
+    const observers: ResizeObserver[] = [];
+    for (const [el, setValue] of pairs) {
+      if (!el) continue;
+      const update = () =>
+        setValue(Math.ceil(el.getBoundingClientRect().height) + 16);
+      update();
+      const observer = new ResizeObserver(update);
+      observer.observe(el);
+      observers.push(observer);
+    }
+    return () => observers.forEach((observer) => observer.disconnect());
+  }, []);
+
+  const questionStatuses = useMemo<PracticeQuestionStatus[]>(() => {
+    const statuses = questions.map((question, index) => ({
+      questionId: question.id,
+      index,
+      text: question.text,
+      type: question.type || "OPEN_ENDED",
+      attemptCount: 0,
+      bestScore: null as number | null,
+      needsRetry: false,
+    }));
+    const byId = new Map(statuses.map((status) => [status.questionId, status]));
+
+    const dbCounts = new Map<string, number>();
+    for (const attempt of attempts) {
+      if (attempt.sessionId !== sessionId) continue;
+      const status = byId.get(attempt.questionId);
+      if (!status) continue;
+      dbCounts.set(
+        attempt.questionId,
+        (dbCounts.get(attempt.questionId) ?? 0) + 1,
+      );
+      const score = Number(attempt.score);
+      if (Number.isFinite(score)) {
+        status.bestScore =
+          status.bestScore == null ? score : Math.max(status.bestScore, score);
+      }
+    }
+
+    // Live (not yet refetched) feedback counts from the current chat thread.
+    const liveCounts = new Map<string, number>();
+    for (const message of messages) {
+      if (
+        message.kind !== "feedback" ||
+        message.feedbackPartial !== false ||
+        !message.questionId
+      ) {
+        continue;
+      }
+      const status = byId.get(message.questionId);
+      if (!status) continue;
+      liveCounts.set(
+        message.questionId,
+        (liveCounts.get(message.questionId) ?? 0) + 1,
+      );
+      const score = message.feedback?.score;
+      if (typeof score === "number" && score > 0) {
+        status.bestScore =
+          status.bestScore == null ? score : Math.max(status.bestScore, score);
+      }
+    }
+
+    for (const status of statuses) {
+      status.attemptCount = Math.max(
+        dbCounts.get(status.questionId) ?? 0,
+        liveCounts.get(status.questionId) ?? 0,
+      );
+      status.needsRetry =
+        status.attemptCount > 0 &&
+        status.bestScore != null &&
+        status.bestScore < PRACTICE_RETRY_SCORE_BAR;
+    }
+    return statuses;
+  }, [attempts, messages, questions, sessionId]);
+
+  type FeedbackChatMessage = Extract<ChatMessage, { kind: "feedback" }>;
+
+  /** Latest fully-graded feedback, only while it is still the newest message. */
+  const latestFeedback = useMemo<FeedbackChatMessage | null>(() => {
+    const last = messages[messages.length - 1];
+    if (
+      last &&
+      last.kind === "feedback" &&
+      last.feedbackPartial === false &&
+      last.feedback &&
+      hasPartialFeedbackHeader(last.feedback)
+    ) {
+      return last;
+    }
+    return null;
+  }, [messages]);
+
+  const getActiveComposerControl = useCallback(() => {
+    const desktop =
+      typeof window !== "undefined" &&
+      window.matchMedia("(min-width: 1024px)").matches;
+    return desktop
+      ? desktopComposerControl.current
+      : mobileComposerControl.current;
+  }, []);
+
+  const handleToggleBookmark = useCallback(
+    (attemptId: string) => {
+      if (toggleBookmark.isLoading) return;
+      toggleBookmark.mutate({ attemptId });
+    },
+    [toggleBookmark],
+  );
+
+  const handlePracticeAnswer = useCallback(
+    (answerText: string) => {
+      if (submitting) return;
+      setDrillScript(answerText);
+      setDraft("");
+      clearPendingAudio();
+      if (latestFeedback) setNextMoveDismissedId(latestFeedback.id);
+      // In voice mode jump straight into recording; in text mode focus typing.
+      const control = getActiveComposerControl();
+      if (mode === "VOICE") control?.startVoice();
+      else control?.focusInput();
+    },
+    [
+      clearPendingAudio,
+      getActiveComposerControl,
+      latestFeedback,
+      mode,
+      submitting,
+    ],
+  );
+
+  const handleNextAction = useCallback(
+    (action: PracticeNextAction, source?: FeedbackChatMessage) => {
+      const message = source ?? latestFeedback ?? undefined;
+      switch (action) {
+        case "retry": {
+          if (message?.answerText) setDraft(message.answerText);
+          if (message) setNextMoveDismissedId(message.id);
+          getActiveComposerControl()?.focusInput();
+          break;
+        }
+        case "sample": {
+          const sampleAnswer = message?.feedback?.sampleAnswer?.trim();
+          if (!sampleAnswer) return;
+          const questionText =
+            message?.questionIndex != null
+              ? questions[message.questionIndex]?.text
+              : currentQuestion?.text;
+          setSampleDialog({ open: true, sampleAnswer, questionText });
+          break;
+        }
+        case "next":
+          if (message) setNextMoveDismissedId(message.id);
+          navigateToQuestion(
+            (message?.questionIndex ?? questionIndex) + 1,
+          );
+          break;
+        case "draft": {
+          const text = message?.answerText ?? draftRef.current;
+          const targetQuestionId =
+            message?.questionId ?? activePrompt?.questionId;
+          if (!text?.trim() || !targetQuestionId) return;
+          savePracticeDraft(sessionId, targetQuestionId, text);
+          if (message) setNextMoveDismissedId(message.id);
+          toast({
+            title: "Draft saved",
+            description:
+              "Your answer will be prefilled when you come back to this question.",
+          });
+          break;
+        }
+        case "real_interview": {
+          const targetQuestionId =
+            message?.questionId ?? activePrompt?.questionId ?? currentQuestion?.id;
+          if (!targetQuestionId) return;
+          if (message) setNextMoveDismissedId(message.id);
+          previewMutation.mutate({ interviewId, questionId: targetQuestionId });
+          break;
+        }
+        case "resume_proof":
+          setProofDrawerOpen(true);
+          break;
+        case "finish":
+          setFinishDialogOpen(true);
+          break;
+      }
+    },
+    [
+      activePrompt,
+      currentQuestion,
+      getActiveComposerControl,
+      latestFeedback,
+      navigateToQuestion,
+      interviewId,
+      previewMutation,
+      questionIndex,
+      questions,
+      sessionId,
+      toast,
+    ],
+  );
+
+  const canGoNextQuestion = questionIndex < questions.length - 1;
+  const showNextMoveBar =
+    latestFeedback !== null &&
+    !submitting &&
+    drillScript === null &&
+    nextMoveDismissedId !== latestFeedback.id;
 
   if (questions.length === 0) {
     return (
@@ -1138,6 +1697,7 @@ export function PracticeSessionChat({
       ? {
           language,
           disabled: !activePrompt,
+          dataTour: "practice-voice-button",
           pendingAudioUrl: pendingAudio?.url ?? null,
           pendingAudioDurationMs: pendingAudio?.durationMs,
           onRecordingComplete: handleRecordingComplete,
@@ -1147,6 +1707,8 @@ export function PracticeSessionChat({
       : undefined;
 
   return (
+    <PracticeTourProvider>
+    <TooltipProvider delayDuration={200}>
     <div className="flex h-screen min-h-[720px] flex-col bg-background">
       <header className="shrink-0 border-b bg-card px-3 py-2 md:px-6 md:py-3">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -1174,6 +1736,36 @@ export function PracticeSessionChat({
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <Sheet open={navSheetOpen} onOpenChange={setNavSheetOpen}>
+              <SheetTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1.5 px-2.5 text-xs lg:hidden"
+                >
+                  <ListOrdered className="h-3.5 w-3.5" aria-hidden />
+                  Questions
+                </Button>
+              </SheetTrigger>
+              <SheetContent side="left" className="flex w-[19rem] flex-col gap-0 p-0">
+                <SheetHeader className="sr-only">
+                  <SheetTitle>Practice questions</SheetTitle>
+                </SheetHeader>
+                <div className="flex min-h-0 flex-1 flex-col pt-9">
+                  <PracticeQuestionNavigator
+                    statuses={questionStatuses}
+                    currentIndex={questionIndex}
+                    disabled={submitting}
+                    onNavigate={(index) => {
+                      setNavSheetOpen(false);
+                      navigateToQuestion(index);
+                    }}
+                  />
+                </div>
+              </SheetContent>
+            </Sheet>
+            <PracticeTourHelpButton />
             <Badge className="gap-1">
               <span className="h-2 w-2 rounded-full bg-primary-foreground" />
               Connected
@@ -1186,7 +1778,7 @@ export function PracticeSessionChat({
             ) : null}
           </div>
         </div>
-        <div className="mt-3 flex items-center gap-4">
+        <div className="mt-3 flex items-center gap-4" data-tour="practice-progress">
           <Progress value={progress} className="h-1.5 flex-1" />
           <span className="shrink-0 text-xs font-medium text-muted-foreground">
             Q{questionIndex + 1} / {questions.length}
@@ -1201,14 +1793,54 @@ export function PracticeSessionChat({
 
       <div
         ref={splitContainerRef}
-        className="hidden min-h-0 flex-1 overflow-hidden lg:flex"
+        className="hidden min-h-0 flex-1 overflow-x-auto overflow-y-hidden lg:flex"
       >
+        {navPanelOpen ? (
+          <>
+            <aside
+              className="flex shrink-0 flex-col bg-muted/10"
+              style={{ width: navWidth }}
+              data-tour="practice-navigator"
+            >
+              <PracticeQuestionNavigator
+                statuses={questionStatuses}
+                currentIndex={questionIndex}
+                disabled={submitting}
+                onNavigate={navigateToQuestion}
+                onToggleSidebar={() => setNavPanelOpen(false)}
+              />
+            </aside>
+            <PanelResizeDivider
+              onPointerDown={handleNavSplitPointerDown}
+              ariaLabel="Resize questions panel"
+            />
+          </>
+        ) : (
+          <CollapsedPanelRail
+            side="left"
+            label="Questions"
+            meta={`${questionIndex + 1}/${questions.length}`}
+            onClick={() => setNavPanelOpen(true)}
+            ariaLabel="Show questions panel"
+          />
+        )}
+        <div
+          ref={chatRightContainerRef}
+          className="flex min-h-0 flex-1"
+        >
         <section
           className="relative flex min-h-0 min-w-0 shrink-0 flex-col"
-          style={{ width: `${splitPercent}%`, minWidth: 320 }}
+          style={
+            rightPanelOpen
+              ? { width: `${splitPercent}%`, minWidth: CHAT_PANEL_MIN_PX }
+              : { flex: 1, minWidth: CHAT_PANEL_MIN_PX }
+          }
         >
           <ScrollArea ref={desktopScrollAreaRef} className="flex-1">
-            <div className="mx-auto flex w-full max-w-4xl flex-col gap-5 px-6 py-8 pb-36">
+            <div
+              className="mx-auto flex w-full max-w-4xl flex-col gap-5 px-6 pt-8"
+              style={{ paddingBottom: desktopChatPadding }}
+            >
               {messages.map((message) => (
                 <ChatMessageView
                   key={message.id}
@@ -1223,14 +1855,39 @@ export function PracticeSessionChat({
                   coachSpeakingPhase={coachSpeakingPhaseForUi}
                   planTier={planTier}
                   mediaRetentionDays={mediaRetentionDays}
+                  currentQuestionIndex={questionIndex}
+                  latestFeedbackId={latestFeedback?.id ?? null}
+                  canNextQuestion={canGoNextQuestion}
+                  actionsDisabled={submitting || previewMutation.isLoading}
+                  bookmarkedAttemptIds={bookmarkedAttemptIds}
+                  bookmarkPending={toggleBookmark.isLoading}
+                  onToggleBookmark={handleToggleBookmark}
+                  onNextAction={handleNextAction}
                 />
               ))}
               <div ref={scrollEndRef} aria-hidden />
             </div>
           </ScrollArea>
 
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-background via-background/95 to-transparent px-6 pb-4 pt-10">
+          <div
+            ref={desktopOverlayRef}
+            className="pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-background via-background/95 to-transparent px-6 pb-4 pt-10"
+          >
             <div className="pointer-events-auto mx-auto w-full max-w-4xl">
+              {showNextMoveBar && latestFeedback?.feedback ? (
+                <NextBestMoveBar
+                  feedback={latestFeedback.feedback}
+                  canNext={canGoNextQuestion}
+                  disabled={submitting || previewMutation.isLoading}
+                  onAction={(action) => handleNextAction(action, latestFeedback)}
+                  onDismiss={() => setNextMoveDismissedId(latestFeedback.id)}
+                  className="mb-2"
+                />
+              ) : null}
+              {drillScript !== null ? (
+                <DrillBanner onDismiss={() => setDrillScript(null)} />
+              ) : null}
+              <div data-tour="practice-composer">
               <ChatComposer
                 className="border bg-card/95 shadow-lg backdrop-blur-sm"
                 value={draft}
@@ -1239,16 +1896,16 @@ export function PracticeSessionChat({
                 onStop={stopGeneration}
                 isGenerating={submitting}
                 disabled={!activePrompt || aiTokensBlocked}
+                controlRef={desktopComposerControl}
                 submitDisabled={
                   !activePrompt ||
                   aiTokensBlocked ||
                   !canGradeAi ||
-                  draft.trim().length < 8
+                  !draft.trim()
                 }
-                minLength={8}
                 placeholder={
                   aiTokensBlocked
-                    ? "Answer submission is unavailable right now..."
+                    ? "Add AI tokens to submit answers…"
                     : !activePrompt
                       ? "Select a question to continue..."
                       : awaitingRetry
@@ -1270,6 +1927,7 @@ export function PracticeSessionChat({
                 aiTokenBalance={composerAiTokens}
                 aiTokensBlocked={composerAiTokensBlocked}
               />
+              </div>
             </div>
           </div>
 
@@ -1305,31 +1963,51 @@ export function PracticeSessionChat({
           </AlertDialog>
         </section>
 
-        <div
-          className="group flex w-1 shrink-0 cursor-col-resize touch-none items-center justify-center border-l border-r border-border bg-muted/30 transition-colors hover:bg-primary/10 active:bg-primary/20"
-          onPointerDown={handleSplitPointerDown}
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize panels"
-        />
+        {rightPanelOpen ? (
+          <>
+            <PanelResizeDivider
+              onPointerDown={handleSplitPointerDown}
+              ariaLabel="Resize panels"
+            />
 
-        <aside className="flex min-h-0 min-w-0 flex-1 flex-col bg-muted/20">
-          <PrepSuggestedAnswerPanel
-            interviewId={interviewId}
-            questionId={currentQuestion?.id ?? null}
-            questionType={currentQuestion?.type ?? null}
-            hasContext={hasContext}
-            prepContext={prepContext}
-            onContextSaved={onPrepContextSaved}
-            canUseHint={canHintAi}
+            <aside
+              className="flex min-h-0 flex-1 flex-col bg-muted/20"
+              style={{ minWidth: RIGHT_PANEL_MIN_PX }}
+              data-tour="practice-suggested"
+            >
+              <PrepSuggestedAnswerPanel
+                interviewId={interviewId}
+                interviewTitle={interviewTitle}
+                questionId={currentQuestion?.id ?? null}
+                questionText={currentQuestion?.text ?? null}
+                questionType={currentQuestion?.type ?? null}
+                hasContext={hasContext}
+                prepContext={prepContext}
+                onContextSaved={onPrepContextSaved}
+                canUseHint={canHintAi}
+                onPracticeAnswer={handlePracticeAnswer}
+                onToggleRightPanel={() => setRightPanelOpen(false)}
+              />
+            </aside>
+          </>
+        ) : (
+          <CollapsedPanelRail
+            side="right"
+            label="Suggested"
+            onClick={() => setRightPanelOpen(true)}
+            ariaLabel="Show suggested answer panel"
           />
-        </aside>
+        )}
+        </div>
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col lg:hidden">
         <section className="relative flex min-h-0 flex-1 flex-col">
           <ScrollArea ref={mobileScrollAreaRef} className="flex-1">
-            <div className="flex flex-col gap-5 px-4 py-6 pb-36">
+            <div
+              className="flex flex-col gap-5 px-4 pt-6"
+              style={{ paddingBottom: mobileChatPadding }}
+            >
               {messages.map((message) => (
                 <ChatMessageView
                   key={message.id}
@@ -1344,13 +2022,37 @@ export function PracticeSessionChat({
                   coachSpeakingPhase={coachSpeakingPhaseForUi}
                   planTier={planTier}
                   mediaRetentionDays={mediaRetentionDays}
+                  currentQuestionIndex={questionIndex}
+                  latestFeedbackId={latestFeedback?.id ?? null}
+                  canNextQuestion={canGoNextQuestion}
+                  actionsDisabled={submitting || previewMutation.isLoading}
+                  bookmarkedAttemptIds={bookmarkedAttemptIds}
+                  bookmarkPending={toggleBookmark.isLoading}
+                  onToggleBookmark={handleToggleBookmark}
+                  onNextAction={handleNextAction}
                 />
               ))}
               <div ref={scrollEndRef} aria-hidden />
             </div>
           </ScrollArea>
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-background via-background/95 to-transparent px-4 pb-4 pt-8">
+          <div
+            ref={mobileOverlayRef}
+            className="pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-background via-background/95 to-transparent px-4 pb-4 pt-8"
+          >
             <div className="pointer-events-auto">
+              {showNextMoveBar && latestFeedback?.feedback ? (
+                <NextBestMoveBar
+                  feedback={latestFeedback.feedback}
+                  canNext={canGoNextQuestion}
+                  disabled={submitting || previewMutation.isLoading}
+                  onAction={(action) => handleNextAction(action, latestFeedback)}
+                  onDismiss={() => setNextMoveDismissedId(latestFeedback.id)}
+                  className="mb-2"
+                />
+              ) : null}
+              {drillScript !== null ? (
+                <DrillBanner onDismiss={() => setDrillScript(null)} />
+              ) : null}
               <ChatComposer
                 className="border bg-card/95 shadow-lg backdrop-blur-sm"
                 value={draft}
@@ -1359,16 +2061,16 @@ export function PracticeSessionChat({
                 onStop={stopGeneration}
                 isGenerating={submitting}
                 disabled={!activePrompt || aiTokensBlocked}
+                controlRef={mobileComposerControl}
                 submitDisabled={
                   !activePrompt ||
                   aiTokensBlocked ||
                   !canGradeAi ||
-                  draft.trim().length < 8
+                  !draft.trim()
                 }
-                minLength={8}
                 placeholder={
                   aiTokensBlocked
-                    ? "Answer submission is unavailable right now..."
+                    ? "Add AI tokens to submit answers…"
                     : !activePrompt
                       ? "Select a question to continue..."
                       : awaitingRetry
@@ -1393,18 +2095,69 @@ export function PracticeSessionChat({
             </div>
           </div>
         </section>
-        <aside className="flex max-h-[40vh] min-h-0 shrink-0 flex-col border-t bg-muted/20">
+        <aside
+          className="flex max-h-[40vh] min-h-0 shrink-0 flex-col border-t bg-muted/20"
+          data-tour="practice-suggested"
+        >
           <PrepSuggestedAnswerPanel
             interviewId={interviewId}
+            interviewTitle={interviewTitle}
             questionId={currentQuestion?.id ?? null}
+            questionText={currentQuestion?.text ?? null}
             questionType={currentQuestion?.type ?? null}
             hasContext={hasContext}
             prepContext={prepContext}
             onContextSaved={onPrepContextSaved}
             canUseHint={canHintAi}
+            onPracticeAnswer={handlePracticeAnswer}
           />
         </aside>
       </div>
+
+      <SampleAnswerDialog
+        open={sampleDialog.open}
+        onOpenChange={(open) =>
+          setSampleDialog((prev) => ({ ...prev, open }))
+        }
+        sampleAnswer={sampleDialog.sampleAnswer}
+        questionText={sampleDialog.questionText}
+      />
+
+      <PrepContextDrawer
+        interviewId={interviewId}
+        open={proofDrawerOpen}
+        onOpenChange={setProofDrawerOpen}
+        fallbackInitial={prepContext}
+        onContextSaved={onPrepContextSaved}
+      />
+    </div>
+    <PracticeTourOverlay />
+    </TooltipProvider>
+    </PracticeTourProvider>
+  );
+}
+
+function DrillBanner({ onDismiss }: { onDismiss: () => void }) {
+  return (
+    <div className="mb-2 flex items-center gap-2 rounded-xl border border-violet-300/60 bg-violet-50/95 px-3 py-2 text-xs shadow-sm backdrop-blur-sm dark:border-violet-900/50 dark:bg-violet-950/60">
+      <Mic
+        className="h-3.5 w-3.5 shrink-0 text-violet-600 dark:text-violet-400"
+        aria-hidden
+      />
+      <p className="min-w-0 flex-1 leading-relaxed">
+        <span className="font-semibold">Speaking drill:</span> deliver the
+        suggested answer aloud in your own words, then send it for feedback.
+      </p>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="h-6 w-6 shrink-0 text-muted-foreground"
+        onClick={onDismiss}
+        aria-label="Dismiss speaking drill"
+      >
+        <X className="h-3.5 w-3.5" />
+      </Button>
     </div>
   );
 }
@@ -1451,7 +2204,7 @@ function PrepAnswerAudioPlayer({
                   <button
                     type="button"
                     className="inline-flex rounded-sm text-white/80 transition-colors hover:text-white"
-                    aria-label={`Audio will be auto-deleted in ${retention.daysRemaining} days`}
+                    aria-label={`Audio will be auto-deleted in ${retention.daysRemaining} days in Free plan`}
                   >
                     <Info className="h-3 w-3" />
                   </button>
@@ -1478,8 +2231,16 @@ function ChatMessageView({
   coachSpeakingTarget = null,
   coachFeedbackMessageId = null,
   coachSpeakingPhase,
-  planTier = "Self-hosted",
+  planTier = "Free",
   mediaRetentionDays = 7,
+  currentQuestionIndex = null,
+  latestFeedbackId = null,
+  canNextQuestion = false,
+  actionsDisabled = false,
+  bookmarkedAttemptIds,
+  bookmarkPending = false,
+  onToggleBookmark,
+  onNextAction,
 }: {
   message: ChatMessage;
   inputMode?: Mode;
@@ -1492,6 +2253,17 @@ function ChatMessageView({
   coachSpeakingPhase?: CoachSpeakingPhase;
   planTier?: PlanTier;
   mediaRetentionDays?: number;
+  currentQuestionIndex?: number | null;
+  latestFeedbackId?: string | null;
+  canNextQuestion?: boolean;
+  actionsDisabled?: boolean;
+  bookmarkedAttemptIds?: Set<string>;
+  bookmarkPending?: boolean;
+  onToggleBookmark?: (attemptId: string) => void;
+  onNextAction?: (
+    action: PracticeNextAction,
+    message: Extract<ChatMessage, { kind: "feedback" }>,
+  ) => void;
 }) {
   if (message.role === "system") {
     return (
@@ -1551,8 +2323,13 @@ function ChatMessageView({
             content={message.content}
             questionIndex={message.questionIndex}
             questionType={message.questionType}
+            questionOptions={message.questionOptions}
             showCoachWave={showQuestionWave}
             coachSpeakingPhase={coachSpeakingPhase}
+            isCurrent={
+              currentQuestionIndex !== null &&
+              message.questionIndex === currentQuestionIndex
+            }
           />
         ) : null}
         {message.kind === "followup" ? (
@@ -1594,12 +2371,35 @@ function ChatMessageView({
         ) : null}
         {message.kind === "feedback" ? (
           message.feedback && hasPartialFeedbackHeader(message.feedback) ? (
-            <FeedbackCard
-              feedback={normalizeFeedback(message.feedback)}
-              partial={message.feedbackPartial}
-              coachSpeaking={feedbackCoachActive}
-              coachSpeakingPhase={coachSpeakingPhase}
-            />
+            <div className="space-y-2.5">
+              <FeedbackCard
+                feedback={normalizeFeedback(message.feedback)}
+                partial={message.feedbackPartial}
+                coachSpeaking={feedbackCoachActive}
+                coachSpeakingPhase={coachSpeakingPhase}
+                bookmarked={
+                  message.attemptId
+                    ? bookmarkedAttemptIds?.has(message.attemptId) ?? false
+                    : false
+                }
+                bookmarkPending={bookmarkPending}
+                onToggleBookmark={
+                  message.attemptId && onToggleBookmark
+                    ? () => onToggleBookmark(message.attemptId!)
+                    : undefined
+                }
+              />
+              {message.feedbackPartial === false &&
+              message.id === latestFeedbackId &&
+              onNextAction ? (
+                <NextActionStrip
+                  feedback={normalizeFeedback(message.feedback)}
+                  canNext={canNextQuestion}
+                  disabled={actionsDisabled}
+                  onAction={(action) => onNextAction(action, message)}
+                />
+              ) : null}
+            </div>
           ) : (
             <StreamingFeedback
               phase={message.phase}
@@ -1624,6 +2424,11 @@ function ChatMessageView({
     </div>
   );
 
+  const isCurrentQuestion =
+    message.kind === "question" &&
+    currentQuestionIndex !== null &&
+    message.questionIndex === currentQuestionIndex;
+
   return (
     <div
       ref={(node) => {
@@ -1632,6 +2437,7 @@ function ChatMessageView({
           registerQuestionAnchor?.(message.questionIndex, node);
         }
       }}
+      data-tour={isCurrentQuestion ? "practice-question" : undefined}
       className={cn(
         "flex",
         message.kind === "question" && "scroll-mt-6",
@@ -1663,15 +2469,24 @@ function QuestionBubble({
   content,
   questionIndex,
   questionType,
+  questionOptions = [],
   showCoachWave = false,
   coachSpeakingPhase,
+  isCurrent = false,
 }: {
   content: string;
   questionIndex?: number;
   questionType?: string;
+  questionOptions?: PrepQuestionOption[];
   showCoachWave?: boolean;
   coachSpeakingPhase?: CoachSpeakingPhase;
+  isCurrent?: boolean;
 }) {
+  const isChoiceQuestion =
+    questionType === "SINGLE_CHOICE" || questionType === "MULTIPLE_CHOICE";
+  const choiceInstruction =
+    questionType === "MULTIPLE_CHOICE" ? "Choose one or more" : "Choose one";
+
   return (
     <div className="space-y-3">
       <div className="flex min-h-10 items-center gap-2">
@@ -1686,6 +2501,31 @@ function QuestionBubble({
         </div>
       </div>
       <p className="text-base font-medium leading-relaxed">{content}</p>
+      {isChoiceQuestion && questionOptions.length > 0 ? (
+        <div className="rounded-lg border bg-muted/20 p-2.5">
+          <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            {choiceInstruction}
+          </div>
+          <ol className="grid gap-1.5 sm:grid-cols-2">
+            {questionOptions.map((option, index) => (
+              <li
+                key={`${option.value ?? option.label}-${index}`}
+                className="flex items-start gap-2 rounded-md border bg-background px-2.5 py-2 text-sm"
+              >
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border bg-muted text-[11px] font-semibold text-muted-foreground">
+                  {String.fromCharCode(65 + index)}
+                </span>
+                <span className="min-w-0 leading-snug">{option.label}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      ) : null}
+      <AnswerTargetChips
+        questionType={questionType}
+        questionText={content}
+        data-tour={isCurrent ? "practice-target" : undefined}
+      />
     </div>
   );
 }
@@ -1834,11 +2674,17 @@ function FeedbackCard({
   partial = false,
   coachSpeaking = false,
   coachSpeakingPhase,
+  bookmarked = false,
+  bookmarkPending = false,
+  onToggleBookmark,
 }: {
   feedback: PrepFeedback;
   partial?: boolean;
   coachSpeaking?: boolean;
   coachSpeakingPhase?: CoachSpeakingPhase;
+  bookmarked?: boolean;
+  bookmarkPending?: boolean;
+  onToggleBookmark?: () => void;
 }) {
   const showDetails = !partial || hasFeedbackDetails(feedback);
   const showPartialDetailsLoading = partial && !hasFeedbackDetails(feedback);
@@ -1846,26 +2692,61 @@ function FeedbackCard({
   return (
     <FeedbackCardShell coachSpeaking={coachSpeaking}>
       <div className="relative border-b bg-gradient-to-br from-primary/10 via-background to-muted/20 px-5 py-4">
-        {coachSpeaking && coachSpeakingPhase ? (
-          <div className="pointer-events-none absolute right-4 top-3 z-10 flex h-10 w-[152px] items-start justify-end">
-            <CoachSpeakingWave phase={coachSpeakingPhase} />
-          </div>
-        ) : null}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
           {partial ? <ScoreRingSkeleton /> : <ScoreRing score={feedback.score} />}
           <div className="min-w-0 flex-1 space-y-2">
-            <div
-              className={cn(
-                "flex min-h-10 flex-wrap items-center gap-2 pr-[168px] sm:pr-0",
-              )}
-            >
-              <h3 className="text-lg font-semibold tracking-tight">
-                {feedback.verdict}
-              </h3>
-              <Badge variant="secondary" className="gap-1">
-                <CheckCircle2 className="h-3 w-3" />
-                Coach feedback
-              </Badge>
+            <div className="flex min-h-10 flex-wrap items-center gap-x-3 gap-y-2">
+              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                <h3 className="min-w-0 max-w-full break-words text-lg font-semibold tracking-tight">
+                  {feedback.verdict}
+                </h3>
+                <Badge variant="secondary" className="shrink-0 gap-1">
+                  <CheckCircle2 className="h-3 w-3" />
+                  Coach feedback
+                </Badge>
+                {onToggleBookmark ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className={cn(
+                          "h-7 w-7 shrink-0",
+                          bookmarked
+                            ? "text-amber-500 hover:text-amber-600"
+                            : "text-muted-foreground hover:text-foreground",
+                        )}
+                        disabled={bookmarkPending}
+                        onClick={onToggleBookmark}
+                        aria-label={
+                          bookmarked
+                            ? "Remove from answer bank"
+                            : "Save to answer bank"
+                        }
+                        aria-pressed={bookmarked}
+                      >
+                        {bookmarked ? (
+                          <BookmarkCheck className="h-4 w-4" />
+                        ) : (
+                          <Bookmark className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="text-xs">
+                      {bookmarked
+                        ? "Remove from answer bank"
+                        : "Save to answer bank"}
+                    </TooltipContent>
+                  </Tooltip>
+                ) : null}
+              </div>
+              {coachSpeaking && coachSpeakingPhase ? (
+                <CoachSpeakingWave
+                  phase={coachSpeakingPhase}
+                  className="h-8 w-full max-w-[152px] overflow-hidden sm:w-[152px]"
+                />
+              ) : null}
             </div>
             <p className="rounded-lg border border-primary/15 bg-primary/5 px-3 py-2.5 text-sm leading-relaxed text-foreground/90">
               {feedback.summary}
@@ -2045,6 +2926,11 @@ function VoiceDeliveryPanel({
           </div>
         ))}
       </div>
+      {delivery.timeline && delivery.timeline.length > 0 ? (
+        <div className="mt-4 border-t border-violet-200/50 pt-3 dark:border-violet-900/30">
+          <VoiceDeliveryTimeline delivery={delivery} compact />
+        </div>
+      ) : null}
       {delivery.tips.length > 0 ? (
         <ul className="mt-4 space-y-2 border-t border-violet-200/50 pt-3 dark:border-violet-900/30">
           {delivery.tips.map((tip) => (

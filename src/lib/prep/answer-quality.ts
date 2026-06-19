@@ -30,7 +30,10 @@ const NON_SUBSTANTIVE_PATTERNS: RegExp[] = [
   /能听到我说话吗/,
   /can you hear me/i,
   /are you there/i,
-  /麦克风|mic(test)?/i,
+  /麦克风.{0,8}(测试|试音|听得到|能听|检查)/,
+  /(测试|试音|检查).{0,8}麦克风/,
+  /\b(?:mic|microphone)\s*(?:test|check|testing)\b/i,
+  /^(?:testing\s+)?(?:my\s+)?(?:mic|microphone)[!.?]?$/i,
 ];
 
 /** True when the candidate did not attempt to answer the interview question. */

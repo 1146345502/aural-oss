@@ -30,7 +30,7 @@ function CodexCenteredBars({
   tick: number;
   barCount: number;
 }) {
-  const maxHalfPx = 14;
+  const maxHalfPx = 15;
 
   return (
     <div className="relative flex h-10 min-w-0 flex-1 items-center">
@@ -38,9 +38,9 @@ function CodexCenteredBars({
       <div className="relative flex h-10 w-full items-center justify-between gap-px">
         {Array.from({ length: barCount }).map((_, i) => {
           const wobble = Math.sin((i + tick) * 0.55) * 0.35 + 0.65;
-          const active = level > 0.02;
+          const active = level > 0.01;
           const halfH = active
-            ? Math.max(2, level * wobble * maxHalfPx)
+            ? Math.max(3, level * wobble * maxHalfPx)
             : 2;
           return (
             <div
@@ -102,7 +102,7 @@ export function RecordingWaveform({
   }
 
   const barCount = expanded ? 72 : 24;
-  const maxBarPx = expanded ? 36 : 28;
+  const maxBarPx = 26;
 
   if (expanded) {
     return (
@@ -120,7 +120,7 @@ export function RecordingWaveform({
                 key={i}
                 className={cn(
                   "w-[2px] shrink-0 rounded-full transition-all duration-100",
-                  level > 0.02 ? "bg-foreground/85" : "bg-muted-foreground/35",
+                  level > 0.01 ? "bg-foreground/85" : "bg-muted-foreground/35",
                 )}
                 style={{ height: `${h}px` }}
               />
@@ -162,7 +162,7 @@ export function RecordingWaveform({
               key={i}
               className={cn(
                 "w-[3px] shrink-0 rounded-full transition-all duration-100",
-                level > 0.02 ? "bg-foreground/85" : "bg-muted-foreground/35",
+                level > 0.01 ? "bg-foreground/85" : "bg-muted-foreground/35",
               )}
               style={{ height: `${h}px` }}
             />

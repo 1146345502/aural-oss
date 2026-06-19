@@ -6,9 +6,17 @@ export type VoiceDeliveryMetrics = {
   clarity: number;
   tone: number;
   tips: string[];
+  timeline: PrepVoiceTimelineSegment[];
+  pauseCount: number;
+  longestPauseSec: number;
+  fillerCount: number;
 };
 
-import type { PrepVoiceDeliveryFeedback } from "@/components/prep/prep-types";
+import type {
+    PrepVoiceDeliveryFeedback,
+    PrepVoiceTimelineSegment,
+} from "@/components/prep/prep-types";
+import { buildVoiceTimeline } from "@/lib/prep/voice-timeline";
 
 function countWords(text: string): number {
   const cjk = text.match(/[\u4e00-\u9fff]/g)?.length ?? 0;
@@ -70,6 +78,7 @@ export async function buildVoiceDeliveryMetrics(
   const { avgRms, variance } = samples
     ? analyzeVolumeFromSamples(samples)
     : { avgRms: 0.05, variance: 0.001 };
+  const timeline = buildVoiceTimeline(samples, durationSeconds, transcript);
 
   // Volume too low or flat → lower confidence
   let confidence = 7;
@@ -122,6 +131,21 @@ export async function buildVoiceDeliveryMetrics(
     );
   }
 
+  if (timeline.pauseCount >= 3) {
+    tips.push(
+      isZh
+        ? `回答中有 ${timeline.pauseCount} 次明显停顿，提前列好要点可以让表达更连贯。`
+        : `There were ${timeline.pauseCount} noticeable pauses — sketch your key points first so the answer flows.`,
+    );
+  }
+  if (timeline.fillerCount >= 5) {
+    tips.push(
+      isZh
+        ? "口头语偏多（嗯、就是等），关键句前停半拍代替填充词。"
+        : "Frequent filler words — replace them with a short pause before key phrases.",
+    );
+  }
+
   return {
     durationSeconds,
     wordsPerMinute,
@@ -129,6 +153,10 @@ export async function buildVoiceDeliveryMetrics(
     clarity,
     tone,
     tips,
+    timeline: timeline.segments,
+    pauseCount: timeline.pauseCount,
+    longestPauseSec: timeline.longestPauseSec,
+    fillerCount: timeline.fillerCount,
   };
 }
 
@@ -140,5 +168,9 @@ export function voiceMetricsToFeedback(
     clarity: metrics.clarity,
     tone: metrics.tone,
     tips: metrics.tips,
+    timeline: metrics.timeline,
+    pauseCount: metrics.pauseCount,
+    longestPauseSec: metrics.longestPauseSec,
+    fillerCount: metrics.fillerCount,
   };
 }

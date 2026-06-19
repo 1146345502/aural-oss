@@ -6,6 +6,16 @@ import {
 /** Max JSON body size when audio is embedded as base64 (~4MB audio + metadata). */
 const MAX_JSON_BODY_BYTES = 6 * 1024 * 1024;
 
+export type VoiceTimelineSegmentBody = {
+  startSec?: number;
+  endSec?: number;
+  energy?: number;
+  wpm?: number | null;
+  pause?: boolean;
+  fillers?: number;
+  lowConfidence?: boolean;
+};
+
 export type VoiceMetricsBody = {
   durationSeconds?: number;
   wordsPerMinute?: number;
@@ -13,6 +23,10 @@ export type VoiceMetricsBody = {
   clarity?: number;
   tone?: number;
   tips?: string[];
+  timeline?: VoiceTimelineSegmentBody[];
+  pauseCount?: number;
+  longestPauseSec?: number;
+  fillerCount?: number;
 };
 
 export type PrepFeedbackRequestPayload = {
@@ -51,11 +65,11 @@ function buildPayload(
   answerAudio?: { mimeType: string; base64: string },
 ): PrepFeedbackRequestPayload | { error: Response } {
   const { sessionId, questionId, answerText } = metadata;
-  if (!sessionId || !questionId || !answerText || answerText.trim().length < 8) {
+  if (!sessionId || !questionId || !answerText?.trim()) {
     return {
       error: jsonError(
         400,
-        "sessionId, questionId, and an answer of at least 8 characters are required",
+        "sessionId, questionId, and a non-empty answer are required",
       ),
     };
   }

@@ -14,12 +14,18 @@ import { buildPrepHintPrompt } from "@/lib/ai/prompts/prep";
 import { resolvePrepResponseLanguage } from "@/lib/prep/answer-quality";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
+const MAX_INSTRUCTION_CHARS = 280;
+const MAX_PREVIOUS_ANSWER_CHARS = 6000;
+
 export async function POST(req: Request) {
   try {
-    const { interviewId, questionId } = (await req.json()) as {
-      interviewId?: string;
-      questionId?: string;
-    };
+    const { interviewId, questionId, instruction, previousAnswer } =
+      (await req.json()) as {
+        interviewId?: string;
+        questionId?: string;
+        instruction?: string;
+        previousAnswer?: string;
+      };
     if (!interviewId || !questionId) {
       return new Response(
         JSON.stringify({ error: "interviewId and questionId are required" }),
@@ -27,13 +33,22 @@ export async function POST(req: Request) {
       );
     }
 
+    const refinementInstruction =
+      typeof instruction === "string"
+        ? instruction.trim().slice(0, MAX_INSTRUCTION_CHARS)
+        : "";
+    const refinementPreviousAnswer =
+      typeof previousAnswer === "string"
+        ? previousAnswer.trim().slice(0, MAX_PREVIOUS_ANSWER_CHARS)
+        : "";
+
     const auth = await authedInterview(interviewId);
     if ("error" in auth) return auth.error;
     const { interview } = auth;
 
     const { data: question } = await supabaseAdmin
       .from("questions")
-      .select("id, text, description, type")
+      .select("id, text, description, type, options")
       .eq("id", questionId)
       .eq("interviewId", interview.id)
       .single();
@@ -62,8 +77,15 @@ export async function POST(req: Request) {
         text: question.text as string,
         description: question.description as string | null,
         type: question.type as string,
+        options: question.options,
       },
       responseLanguage,
+      refinement: refinementInstruction
+        ? {
+            instruction: refinementInstruction,
+            previousAnswer: refinementPreviousAnswer || null,
+          }
+        : undefined,
     });
 
     const stream = new ReadableStream({

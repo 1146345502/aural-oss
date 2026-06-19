@@ -15,6 +15,7 @@ type PrepQuestionRow = {
   text: string;
   description: string | null;
   type: string;
+  options: unknown;
 };
 
 type PriorAttemptRow = {
@@ -34,7 +35,7 @@ export type LoadedPrepFeedbackContext = {
   question: PrepQuestionRow;
   priorAttempts: PriorAttemptRow[] | null;
   tokenCheck: {
-    allowed: true;
+    allowed: boolean;
     balance: number;
   };
 };
@@ -95,7 +96,7 @@ export async function loadPrepFeedbackContext(
   const [questionResult, priorAttemptsResult] = await Promise.all([
     supabaseAdmin
       .from("questions")
-      .select("id, text, description, type")
+      .select("id, text, description, type, options")
       .eq("id", questionId)
       .eq("interviewId", interview.id)
       .single(),

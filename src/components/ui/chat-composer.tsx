@@ -2,32 +2,47 @@
 
 import { Button } from "@/components/ui/button";
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
+    Popover,
+    PopoverContent,
+    PopoverTrigger,
 } from "@/components/ui/popover";
 import { RecordingWaveform } from "@/components/ui/recording-waveform";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  usePrepVoiceCapture,
-  type PrepVoiceRecording,
+    usePrepVoiceCapture,
+    type PrepVoiceRecording,
 } from "@/hooks/use-prep-voice-capture";
 import { cn } from "@/lib/utils";
+import type { LucideIcon } from "lucide-react";
 import {
-  ArrowUp,
-  ChevronLeft,
-  ChevronRight,
-  Code2,
-  Loader2,
-  Mic,
-  PenLine,
-  Sparkles,
-  Square,
-  Volume2,
-  VolumeX,
-  X,
+    ArrowUp,
+    ChevronLeft,
+    ChevronRight,
+    Code2,
+    Coins,
+    ExternalLink,
+    Loader2,
+    Mic,
+    PenLine,
+    Sparkles,
+    Square,
+    Volume2,
+    VolumeX,
+    X,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, type RefObject } from "react";
+import {
+    useCallback,
+    useEffect,
+    useRef,
+    type MutableRefObject,
+    type RefObject,
+} from "react";
+
+/** Imperative handle for parents (e.g. start a speaking drill, focus input). */
+export type ChatComposerControl = {
+  startVoice: () => void;
+  focusInput: () => void;
+};
 
 export type ChatComposerProps = {
   value: string;
@@ -40,11 +55,14 @@ export type ChatComposerProps = {
   submitDisabled?: boolean;
   minLength?: number;
   textareaRef?: RefObject<HTMLTextAreaElement>;
+  /** Receives an imperative control handle (voice start / focus). */
+  controlRef?: MutableRefObject<ChatComposerControl | null>;
   className?: string;
   compact?: boolean;
   voice?: {
     language?: string;
     disabled?: boolean;
+    dataTour?: string;
     pendingAudioUrl?: string | null;
     pendingAudioDurationMs?: number;
     onRecordingComplete?: (recording: PrepVoiceRecording) => void;
@@ -57,7 +75,7 @@ export type ChatComposerProps = {
     coachMuted?: boolean;
     onToggleCoachMute?: () => void;
     showCoachMute?: boolean;
-    /** When true, coach voice is unavailable. */
+    /** When true, coach voice is unavailable (e.g. insufficient AI tokens). */
     coachDisabled?: boolean;
     onFinish?: () => void;
     finishLoading?: boolean;
@@ -66,6 +84,7 @@ export type ChatComposerProps = {
   /** Blocks answer submit / voice input when grading cannot be afforded. */
   aiTokensBlocked?: {
     message: string;
+    billingHref?: string;
   };
   questionNav?: {
     onBeforeNavigate?: () => void;
@@ -77,7 +96,11 @@ export type ChatComposerProps = {
   };
   aiTokenBalance?: {
     remaining: number;
+    included?: number;
+    creditBalanceCents?: number;
+    planTier?: string;
     loading?: boolean;
+    href?: string;
   };
   sessionTools?: {
     whiteboardOpen?: boolean;
@@ -91,13 +114,89 @@ export type ChatComposerProps = {
 const MIN_TEXTAREA_PX = 44;
 const MAX_TEXTAREA_PX = 176;
 
+function formatCreditDollars(cents: number): string {
+  return `$${(Math.max(0, cents) / 100).toFixed(2)}`;
+}
+
+function AiTokensMetricRow({
+  icon: Icon,
+  label,
+  value,
+  warn,
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: string;
+  warn?: boolean;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-2 rounded-md px-1.5 py-1 -mx-1.5",
+        warn && "bg-amber-50/90 dark:bg-amber-950/35",
+      )}
+    >
+      <Icon
+        className={cn(
+          "h-3.5 w-3.5 shrink-0",
+          warn
+            ? "text-amber-600 dark:text-amber-400"
+            : "text-muted-foreground/80",
+        )}
+        aria-hidden
+      />
+      <span
+        className={cn(
+          "min-w-0 flex-1 truncate text-[11px]",
+          warn
+            ? "text-amber-700 dark:text-amber-300"
+            : "text-muted-foreground",
+        )}
+      >
+        {label}
+      </span>
+      <span
+        className={cn(
+          "shrink-0 text-[11px] font-medium tabular-nums",
+          warn
+            ? "text-amber-600 dark:text-amber-400"
+            : "text-foreground/90",
+        )}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
 function AiTokensPopover({
   remaining,
+  included,
+  creditBalanceCents = 0,
+  planTier,
   loading,
+  billingHref = "/billing",
 }: {
   remaining: number;
+  included?: number;
+  creditBalanceCents?: number;
+  planTier?: string;
   loading?: boolean;
+  billingHref?: string;
 }) {
+  const openBilling = () => {
+    window.open(billingHref, "_blank", "noopener,noreferrer");
+  };
+  const tokenRemaining = Math.max(0, remaining);
+  const tokenIncluded = Math.max(1, included ?? remaining ?? 1);
+  const tokenRemainingPct = Math.min(
+    100,
+    (tokenRemaining / tokenIncluded) * 100,
+  );
+  const creditCents = Math.max(0, creditBalanceCents);
+  const tokenWarn = tokenRemaining === 0 || tokenRemainingPct <= 30;
+  const hasWarning = tokenWarn && creditCents === 0;
+
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -107,38 +206,71 @@ function AiTokensPopover({
           size="sm"
           className="h-8 gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted"
           disabled={loading}
-          aria-label="Model usage"
+          aria-label="AI tokens"
         >
           <Sparkles className="h-3.5 w-3.5 shrink-0" />
-          Usage
+          AI tokens
         </Button>
       </PopoverTrigger>
       <PopoverContent
         side="top"
         align="start"
         sideOffset={6}
-        className="w-[12rem] rounded-xl border border-border bg-card p-3 shadow-xl backdrop-blur-sm"
+        className="w-56 rounded-xl border border-border/80 bg-card p-3 shadow-lg"
       >
-        <div className="flex flex-col gap-2 text-left">
-          <div>
-            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">
-              Available budget
-            </p>
-            <div className="flex items-baseline gap-1">
-              <span className="text-lg font-semibold tabular-nums text-foreground leading-none">
-                {loading ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-                ) : (
-                  remaining.toLocaleString()
-                )}
-              </span>
-              <span className="text-[10px] text-muted-foreground">units</span>
-            </div>
-          </div>
-          <p className="text-[10px] leading-snug text-muted-foreground">
-            Used for practice grading cards and suggested answers.
-          </p>
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs font-semibold text-foreground">AI Balance</p>
+          {!loading && planTier ? (
+            <span className="shrink-0 rounded-md border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+              {planTier} Plan
+            </span>
+          ) : null}
         </div>
+        {loading ? (
+          <div className="flex items-center gap-2 py-4 text-xs text-muted-foreground">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+            Loading...
+          </div>
+        ) : (
+          <>
+            <div className="mt-2.5 space-y-2">
+              <AiTokensMetricRow
+                icon={Sparkles}
+                label="AI Tokens"
+                value={`${tokenRemaining.toLocaleString()}/${tokenIncluded.toLocaleString()}`}
+                warn={hasWarning}
+              />
+              <AiTokensMetricRow
+                icon={Coins}
+                label="Credits"
+                value={formatCreditDollars(creditCents)}
+                warn={hasWarning}
+              />
+            </div>
+            <p
+              className={cn(
+                "mt-2.5 text-[10px] leading-snug",
+                hasWarning
+                  ? "text-amber-600 dark:text-amber-400"
+                  : "text-muted-foreground",
+              )}
+            >
+              {hasWarning
+                ? "AI tokens are low and no credits are available for overage."
+                : "Credits are used automatically when included AI tokens run out."}
+            </p>
+            <Button
+              type="button"
+              variant="default"
+              size="sm"
+              className="mt-3 h-8 w-full gap-1 text-xs font-semibold shadow-sm [&_svg]:!size-3"
+              onClick={openBilling}
+            >
+              Purchase
+              <ExternalLink strokeWidth={1.75} aria-hidden />
+            </Button>
+          </>
+        )}
       </PopoverContent>
     </Popover>
   );
@@ -158,6 +290,7 @@ export function ChatComposer({
   submitDisabled,
   minLength = 1,
   textareaRef,
+  controlRef,
   className,
   compact = false,
   voice,
@@ -180,6 +313,24 @@ export function ChatComposer({
     onRecordingComplete: voice?.onRecordingComplete,
   });
   const isRecording = voiceCapture.listening;
+
+  useEffect(() => {
+    if (!controlRef) return;
+    controlRef.current = {
+      startVoice: () => {
+        if (!voice || disabled || voice.disabled || isGenerating) return;
+        if (voiceCapture.listening) return;
+        voice.onBeforeVoiceStart?.();
+        void voiceCapture.start(value);
+      },
+      focusInput: () => {
+        ref.current?.focus();
+      },
+    };
+    return () => {
+      controlRef.current = null;
+    };
+  });
 
   const resizeTextarea = useCallback(() => {
     const el = ref.current;
@@ -255,6 +406,20 @@ export function ChatComposer({
           <p className="min-w-0 flex-1 text-xs leading-snug text-destructive">
             {aiTokensBlocked.message}
           </p>
+          {aiTokensBlocked.billingHref ? (
+            <Button
+              type="button"
+              variant="default"
+              size="sm"
+              className="h-7 shrink-0 gap-1 px-2.5 text-[11px] font-semibold shadow-sm [&_svg]:!size-3"
+              onClick={() =>
+                window.open(aiTokensBlocked.billingHref, "_blank", "noopener,noreferrer")
+              }
+            >
+              Purchase
+              <ExternalLink strokeWidth={1.75} aria-hidden />
+            </Button>
+          ) : null}
         </div>
       ) : null}
       <Textarea
@@ -269,7 +434,7 @@ export function ChatComposer({
         }}
         placeholder={
           aiTokensBlocked
-            ? "Answer submission is unavailable right now..."
+            ? "Add AI tokens to submit answers and use coach voice…"
             : placeholder
         }
         disabled={disabled || Boolean(aiTokensBlocked) || (isGenerating && !onStop)}
@@ -365,6 +530,7 @@ export function ChatComposer({
               type="button"
               variant="ghost"
               size="sm"
+              data-tour="practice-finish"
               className="h-8 gap-1.5 px-2 text-xs text-muted-foreground"
               disabled={sessionActions.finishDisabled || sessionActions.finishLoading}
               onClick={sessionActions.onFinish}
@@ -425,7 +591,7 @@ export function ChatComposer({
               }
               title={
                 sessionActions.coachDisabled
-                  ? "Coach voice is unavailable"
+                  ? "Coach voice requires AI tokens"
                   : undefined
               }
             >
@@ -444,7 +610,11 @@ export function ChatComposer({
           {aiTokenBalance ? (
             <AiTokensPopover
               remaining={aiTokenBalance.remaining}
+              included={aiTokenBalance.included}
+              creditBalanceCents={aiTokenBalance.creditBalanceCents}
+              planTier={aiTokenBalance.planTier}
               loading={aiTokenBalance.loading}
+              billingHref={aiTokenBalance.href}
             />
           ) : null}
         </div>
@@ -455,6 +625,7 @@ export function ChatComposer({
               type="button"
               variant="outline"
               size="icon"
+              data-tour={voice.dataTour}
               className="h-8 w-8 rounded-full"
               disabled={voiceDisabled}
               onClick={() => {

@@ -37,6 +37,7 @@ type QuestionRow = {
   text: string;
   description: string | null;
   type: string;
+  options: unknown;
 };
 
 type PrepAttemptRow = {
@@ -441,7 +442,7 @@ export const prepRouter = router({
         await Promise.all([
           ctx.supabase
             .from("questions")
-            .select('id, "interviewId", "order", text, description, type')
+            .select('id, "interviewId", "order", text, description, type, options')
             .eq("interviewId", interview.id)
             .order("order", { ascending: true }),
           ctx.supabase
@@ -489,6 +490,65 @@ export const prepRouter = router({
           retentionDays: RETENTION_DAYS,
           hasAnswerAudio,
         },
+      };
+    }),
+
+  /** Full report for one practice session: session, questions, graded attempts. */
+  getSessionReport: protectedProcedure
+    .input(z.object({ sessionId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const { data: session } = await ctx.supabase
+        .from("prep_sessions")
+        .select("*")
+        .eq("id", input.sessionId)
+        .eq("userId", ctx.user.id)
+        .single();
+
+      if (!session) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Practice session not found",
+        });
+      }
+
+      const sessionRow = session as PrepSessionRow;
+      const interview = await loadInterviewForOwner(
+        ctx.supabase,
+        sessionRow.interviewId,
+        ctx.user.id,
+      );
+
+      const [{ data: questions }, { data: attempts }] = await Promise.all([
+        ctx.supabase
+          .from("questions")
+          .select('id, "interviewId", "order", text, description, type, options')
+          .eq("interviewId", sessionRow.interviewId)
+          .order("order", { ascending: true }),
+        ctx.supabase
+          .from("prep_attempts")
+          .select("*")
+          .eq("sessionId", sessionRow.id)
+          .eq("userId", ctx.user.id)
+          .order("createdAt", { ascending: true }),
+      ]);
+
+      const attemptRows = await Promise.all(
+        ((attempts ?? []) as PrepAttemptRow[]).map(async (attempt) => ({
+          ...attempt,
+          audioUrl: await resolvePrepAnswerAudioUrl(attempt.audioUrl),
+        })),
+      );
+
+      return {
+        session: sessionRow,
+        interview: {
+          id: interview.id,
+          title: interview.title,
+          companyName: interview.companyName,
+          roleTitle: interview.roleTitle,
+        },
+        questions: (questions ?? []) as QuestionRow[],
+        attempts: attemptRows,
       };
     }),
 

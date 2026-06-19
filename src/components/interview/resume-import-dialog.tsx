@@ -4,21 +4,21 @@ import { useOrg } from "@/components/org-provider";
 import { AiButton } from "@/components/ui/ai-button";
 import { Button } from "@/components/ui/button";
 import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogHeader,
-    DialogTitle,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { trpc } from "@/lib/trpc/client";
 import {
-    AlertCircle,
-    CheckCircle2,
-    FileText,
-    Loader2,
-    Upload,
-    X,
+  AlertCircle,
+  CheckCircle2,
+  FileText,
+  Loader2,
+  Upload,
+  X,
 } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 
