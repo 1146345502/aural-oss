@@ -7,6 +7,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
+import {
+  REAUTH_OTP_LENGTH,
+  createEmptyReauthOtp,
+} from "@/lib/auth/reauth-otp";
 import { createClient } from "@/lib/supabase/client";
 import { Loader2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -33,13 +37,13 @@ export default function AccountPage() {
     "idle",
   );
   const [deleteLoading, setDeleteLoading] = useState(false);
-  const [deleteOtp, setDeleteOtp] = useState(["", "", "", "", "", "", "", ""]);
+  const [deleteOtp, setDeleteOtp] = useState(createEmptyReauthOtp);
   const deleteOtpRefs = useRef<(HTMLInputElement | null)[]>([]);
   const [deleteResendCooldown, setDeleteResendCooldown] = useState(0);
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [passwordLoading, setPasswordLoading] = useState(false);
-  const [otp, setOtp] = useState(["", "", "", "", "", "", "", ""]);
+  const [otp, setOtp] = useState(createEmptyReauthOtp);
   const otpRefs = useRef<(HTMLInputElement | null)[]>([]);
   const [resendCooldown, setResendCooldown] = useState(0);
 
@@ -57,20 +61,24 @@ export default function AccountPage() {
 
   const handleOtpChange = (index: number, value: string) => {
     if (value.length > 1) {
-      const chars = value.replace(/\D/g, "").slice(0, 8).split("");
+      const chars = value.replace(/\D/g, "").slice(0, REAUTH_OTP_LENGTH).split("");
       const next = [...otp];
       chars.forEach((c, i) => {
-        if (index + i < 8) next[index + i] = c;
+        if (index + i < REAUTH_OTP_LENGTH) next[index + i] = c;
       });
       setOtp(next);
-      otpRefs.current[Math.min(index + chars.length, 7)]?.focus();
+      otpRefs.current[
+        Math.min(index + chars.length, REAUTH_OTP_LENGTH - 1)
+      ]?.focus();
       return;
     }
     const digit = value.replace(/\D/g, "");
     const next = [...otp];
     next[index] = digit;
     setOtp(next);
-    if (digit && index < 7) otpRefs.current[index + 1]?.focus();
+    if (digit && index < REAUTH_OTP_LENGTH - 1) {
+      otpRefs.current[index + 1]?.focus();
+    }
   };
 
   const handleOtpKeyDown = (index: number, e: React.KeyboardEvent) => {
@@ -83,7 +91,7 @@ export default function AccountPage() {
     setPasswordStep("idle");
     setNewPassword("");
     setConfirmPassword("");
-    setOtp(["", "", "", "", "", "", "", ""]);
+    setOtp(createEmptyReauthOtp());
     setResendCooldown(0);
   };
 
@@ -135,7 +143,7 @@ export default function AccountPage() {
 
   const handleVerifyAndUpdate = async () => {
     const nonce = otp.join("");
-    if (nonce.length !== 8) return;
+    if (nonce.length !== REAUTH_OTP_LENGTH) return;
 
     setPasswordLoading(true);
     try {
@@ -173,7 +181,7 @@ export default function AccountPage() {
             email: user?.email ?? "",
           }),
         });
-        setOtp(["", "", "", "", "", "", "", ""]);
+        setOtp(createEmptyReauthOtp());
         otpRefs.current[0]?.focus();
       }
     } finally {
@@ -190,20 +198,24 @@ export default function AccountPage() {
 
   const handleDeleteOtpChange = (index: number, value: string) => {
     if (value.length > 1) {
-      const chars = value.replace(/\D/g, "").slice(0, 8).split("");
+      const chars = value.replace(/\D/g, "").slice(0, REAUTH_OTP_LENGTH).split("");
       const next = [...deleteOtp];
       chars.forEach((c, i) => {
-        if (index + i < 8) next[index + i] = c;
+        if (index + i < REAUTH_OTP_LENGTH) next[index + i] = c;
       });
       setDeleteOtp(next);
-      deleteOtpRefs.current[Math.min(index + chars.length, 7)]?.focus();
+      deleteOtpRefs.current[
+        Math.min(index + chars.length, REAUTH_OTP_LENGTH - 1)
+      ]?.focus();
       return;
     }
     const digit = value.replace(/\D/g, "");
     const next = [...deleteOtp];
     next[index] = digit;
     setDeleteOtp(next);
-    if (digit && index < 7) deleteOtpRefs.current[index + 1]?.focus();
+    if (digit && index < REAUTH_OTP_LENGTH - 1) {
+      deleteOtpRefs.current[index + 1]?.focus();
+    }
   };
 
   const handleDeleteOtpKeyDown = (index: number, e: React.KeyboardEvent) => {
@@ -214,7 +226,7 @@ export default function AccountPage() {
 
   const resetDeleteState = () => {
     setDeleteStep("idle");
-    setDeleteOtp(["", "", "", "", "", "", "", ""]);
+    setDeleteOtp(createEmptyReauthOtp());
     setDeleteResendCooldown(0);
   };
 
@@ -239,7 +251,7 @@ export default function AccountPage() {
 
   const handleDeleteConfirm = async () => {
     const nonce = deleteOtp.join("");
-    if (nonce.length !== 8) return;
+    if (nonce.length !== REAUTH_OTP_LENGTH) return;
 
     setDeleteLoading(true);
     try {
@@ -277,7 +289,7 @@ export default function AccountPage() {
           title: "Code resent",
           description: `A new code was sent to ${user?.email}`,
         });
-        setDeleteOtp(["", "", "", "", "", "", "", ""]);
+        setDeleteOtp(createEmptyReauthOtp());
         deleteOtpRefs.current[0]?.focus();
       }
     } finally {
@@ -462,7 +474,7 @@ export default function AccountPage() {
                         }}
                         type="text"
                         inputMode="numeric"
-                        maxLength={8}
+                        maxLength={REAUTH_OTP_LENGTH}
                         value={digit}
                         onChange={(e) => handleOtpChange(i, e.target.value)}
                         onKeyDown={(e) => handleOtpKeyDown(i, e)}
@@ -474,7 +486,10 @@ export default function AccountPage() {
                   <div className="flex gap-2">
                     <Button
                       size="sm"
-                      disabled={passwordLoading || otp.join("").length !== 8}
+                      disabled={
+                        passwordLoading ||
+                        otp.join("").length !== REAUTH_OTP_LENGTH
+                      }
                       onClick={handleVerifyAndUpdate}
                     >
                       {passwordLoading && (
@@ -592,7 +607,7 @@ export default function AccountPage() {
                         }}
                         type="text"
                         inputMode="numeric"
-                        maxLength={8}
+                        maxLength={REAUTH_OTP_LENGTH}
                         value={digit}
                         onChange={(e) =>
                           handleDeleteOtpChange(i, e.target.value)
@@ -608,7 +623,8 @@ export default function AccountPage() {
                       size="sm"
                       variant="destructive"
                       disabled={
-                        deleteLoading || deleteOtp.join("").length !== 8
+                        deleteLoading ||
+                        deleteOtp.join("").length !== REAUTH_OTP_LENGTH
                       }
                       onClick={handleDeleteConfirm}
                     >
