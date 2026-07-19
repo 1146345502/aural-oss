@@ -5,6 +5,23 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Simplified Chinese README with prominent language switching.
+- Browser-backed fallback for job-description URL imports blocked by anti-bot challenges.
+
+### Changed
+
+- Practice feedback actions can add or remove completed attempts from the answer bank.
+- Interview completion screens now distinguish configured interview limits from account session limits.
+- Practice grading compatibility estimate reduced from 20 to 10 AI tokens.
+
+### Fixed
+
+- Keep the animated AI border complete on cards with wide aspect ratios.
+
 ## [0.3.1] - 2026-06-19
 
 ### Fixed

@@ -193,27 +193,32 @@
 }
 
 /* AI button spinning rainbow border */
+@property --ai-border-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
 .ai-border-spin {
   position: relative;
+  isolation: isolate;
 }
+/* Fill the whole element and spin the gradient angle (rather than rotating an
+   oversized ellipse) so the border stays complete at any aspect ratio. */
 .ai-border-spin::before {
   content: "";
   position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 200%;
-  aspect-ratio: 1;
-  translate: -50% -50%;
+  z-index: 0;
+  inset: 0;
+  border-radius: inherit;
   background: conic-gradient(
-    from 0deg,
+    from var(--ai-border-angle, 0deg),
     #f43f5e, #f59e0b, #10b981, #3b82f6, #8b5cf6, #f43f5e
   );
-  border-radius: 50%;
   animation: ai-spin 2s linear infinite;
-  will-change: transform;
+  will-change: --ai-border-angle;
 }
 @keyframes ai-spin {
-  to { rotate: 360deg; }
+  to { --ai-border-angle: 360deg; }
 }
 
 /* Guided tour */

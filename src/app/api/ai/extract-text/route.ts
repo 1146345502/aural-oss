@@ -1,5 +1,6 @@
 import { getAuthUser } from "@/lib/auth";
 import { createLogger } from "@/lib/logger";
+import { fetchUrlWithReaderFallback } from "@/lib/url-fetch";
 import * as cheerio from "cheerio";
 
 const log = createLogger("api/ai/extract-text");
@@ -72,14 +73,7 @@ export async function POST(req: Request) {
         );
       }
 
-      const res = await fetch(targetUrl, {
-        headers: {
-          "User-Agent":
-            "Mozilla/5.0 (compatible; AuralBot/1.0; +https://aural.app)",
-          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        },
-        signal: AbortSignal.timeout(15_000),
-      });
+      const { response: res } = await fetchUrlWithReaderFallback(targetUrl);
 
       if (!res.ok) {
         return Response.json(
@@ -94,6 +88,8 @@ export async function POST(req: Request) {
         const buffer = Buffer.from(await res.arrayBuffer());
         const pdfData = await pdfParse(buffer);
         extractedText = pdfData.text?.trim() ?? "";
+      } else if (contentType.includes("text/plain")) {
+        extractedText = (await res.text()).trim();
       } else {
         const html = await res.text();
         extractedText = htmlToText(html);

@@ -7,10 +7,14 @@ import { IntervieweeOnboarding, PreviewWrapper } from "@/components/session/inte
 import { IntervieweeTourOverlay } from "@/components/session/interviewee-tour-overlay";
 import { IntervieweeTourProvider } from "@/components/session/interviewee-tour-provider";
 import { PreparingScreen } from "@/components/session/preparing-screen";
-import { Card, CardContent } from "@/components/ui/card";
+import {
+  normalizeSessionEndReason,
+  SessionEndedScreen,
+  type SessionEndReason,
+  type SessionEndReasonInput,
+} from "@/components/session/session-ended-screen";
 import type { InterviewContext } from "@/hooks/use-voice";
 import { trpc } from "@/lib/trpc/client";
-import { CheckCircle2 } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -37,12 +41,14 @@ export default function SlugSessionPage() {
   const previewQuestionId = searchParams.get("question");
 
   const [completed, setCompleted] = useState(false);
-  const [completionReason, setCompletionReason] = useState<string | undefined>();
+  const [completionReason, setCompletionReason] = useState<
+    SessionEndReason | undefined
+  >();
   const [onboardingDone, setOnboardingDone] = useState(isPreview);
   const [previewTourDone, setPreviewTourDone] = useState(Boolean(previewQuestionId));
 
-  const handleComplete = (reason?: string) => {
-    setCompletionReason(reason);
+  const handleComplete = (reason?: SessionEndReasonInput) => {
+    setCompletionReason(normalizeSessionEndReason(reason));
     setCompleted(true);
   };
 
@@ -74,26 +80,7 @@ export default function SlugSessionPage() {
 
   if (session.data.status === "COMPLETED" || completed) {
     try { localStorage.removeItem(STORAGE_PREFIX + slug); } catch { /* noop */ }
-    const isTimeLimit = completionReason === "TIME_LIMIT_EXCEEDED";
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-muted/30 p-4">
-        <Card className="w-full max-w-md">
-          <CardContent className="py-12 text-center">
-            <CheckCircle2 className="mx-auto h-16 w-16 text-secondary-500" />
-            <h2 className="mt-4 text-2xl font-bold">Thank you!</h2>
-            {isTimeLimit && (
-              <p className="mt-2 text-sm text-amber-600">
-                The session time limit has been reached and the interview was ended automatically.
-              </p>
-            )}
-            <p className="mt-2 text-muted-foreground">
-              Your interview has been completed successfully. We appreciate your
-              time and thoughtful responses.
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-    );
+    return <SessionEndedScreen reason={completionReason} />;
   }
 
   if (!onboardingDone) {

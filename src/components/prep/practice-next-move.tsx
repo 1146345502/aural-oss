@@ -13,11 +13,12 @@ import { cn } from "@/lib/utils";
 import {
     ArrowRight,
     BookOpenText,
+    Bookmark,
+    BookmarkCheck,
     ExternalLink,
     FilePlus2,
     Flag,
     RotateCcw,
-    Save,
     Sparkles,
     X,
 } from "lucide-react";
@@ -27,7 +28,7 @@ export type PracticeNextAction =
   | "retry"
   | "sample"
   | "next"
-  | "draft"
+  | "answer_bank"
   | "real_interview"
   | "resume_proof"
   | "finish";
@@ -89,7 +90,7 @@ const ACTION_META: Record<
   retry: { label: "Retry this answer", icon: RotateCcw },
   sample: { label: "View sample answer", icon: BookOpenText },
   next: { label: "Move next", icon: ArrowRight },
-  draft: { label: "Save as draft", icon: Save },
+  answer_bank: { label: "Save to answer bank", icon: Bookmark },
   real_interview: { label: "Practice in real interview", icon: ExternalLink },
   resume_proof: { label: "Add resume proof", icon: FilePlus2 },
   finish: { label: "Finish practice", icon: Flag },
@@ -100,11 +101,15 @@ export function NextActionStrip({
   feedback,
   canNext,
   disabled = false,
+  attemptId,
+  bookmarked = false,
   onAction,
 }: {
   feedback: PrepFeedback;
   canNext: boolean;
   disabled?: boolean;
+  attemptId?: string | null;
+  bookmarked?: boolean;
   onAction: (action: PracticeNextAction) => void;
 }) {
   const actions: PracticeNextAction[] = [
@@ -112,13 +117,16 @@ export function NextActionStrip({
     ...(feedback.sampleAnswer?.trim() ? (["sample"] as const) : []),
     "real_interview",
     ...(canNext ? (["next"] as const) : []),
-    "draft",
+    ...(attemptId ? (["answer_bank"] as const) : []),
   ];
 
   return (
     <div className="mt-2 flex flex-wrap items-center gap-1.5">
       {actions.map((action) => {
         const { label, icon: Icon } = ACTION_META[action];
+        const isBookmarked = action === "answer_bank" && bookmarked;
+        const actionLabel = isBookmarked ? "Remove from answer bank" : label;
+        const ActionIcon = isBookmarked ? BookmarkCheck : Icon;
         return (
           <Button
             key={action}
@@ -126,11 +134,14 @@ export function NextActionStrip({
             variant="outline"
             size="sm"
             disabled={disabled}
-            className="h-7 gap-1.5 rounded-full px-2.5 text-xs font-normal"
+            className={cn(
+              "h-7 gap-1.5 rounded-full px-2.5 text-xs font-normal",
+              isBookmarked && "border-amber-200/80 text-amber-600 hover:text-amber-700",
+            )}
             onClick={() => onAction(action)}
           >
-            <Icon className="h-3 w-3" aria-hidden />
-            {label}
+            <ActionIcon className="h-3 w-3" aria-hidden />
+            {actionLabel}
           </Button>
         );
       })}

@@ -6,6 +6,7 @@ import {
     type CodeEditorCanvasRef,
 } from "@/components/code-editor/code-editor-canvas";
 import { IntervieweeHelpPopover } from "@/components/session/interviewee-help-popover";
+import type { SessionEndReasonInput } from "@/components/session/session-ended-screen";
 import {
     AlertDialog,
     AlertDialogAction,
@@ -84,7 +85,7 @@ export function ChatInterface({
   durationMinutes?: number;
   initialMessages?: Message[];
   initialQuestionIndex?: number;
-  onComplete: (reason?: string) => void;
+  onComplete: (reason?: SessionEndReasonInput) => void;
   /** Render in static preview mode — shows full layout without API calls */
   preview?: boolean;
 }) {
@@ -908,7 +909,7 @@ export function ChatInterface({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ json: { id: sessionId } }),
       });
-      onComplete();
+      onComplete("INTERVIEW_TIME_LIMIT_REACHED");
     })();
   }, [remainingSeconds, saveAllDrawings, saveAllCodeSnippets, sessionId, onComplete]);
 
@@ -1057,7 +1058,7 @@ export function ChatInterface({
         const errMsg = body?.error?.json?.message ?? body?.error?.message ?? "";
         if (errMsg.includes("session time has been reached") || (body?.error?.json?.data?.code === "FORBIDDEN" && errMsg.includes("time"))) {
           setSending(false);
-          onComplete("TIME_LIMIT_EXCEEDED");
+          onComplete("ACCOUNT_SESSION_TIME_LIMIT_REACHED");
           return;
         }
         setMessages(messages);

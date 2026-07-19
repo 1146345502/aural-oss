@@ -4,8 +4,9 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
 import { Card, CardContent } from "@/components/ui/card";
-import { Link2Off, CheckCircle2 } from "lucide-react";
+import { Link2Off } from "lucide-react";
 import { PreparingScreen } from "@/components/session/preparing-screen";
+import { SessionEndedScreen } from "@/components/session/session-ended-screen";
 
 export default function InvitePage() {
   const params = useParams();
@@ -82,20 +83,7 @@ export default function InvitePage() {
 
   // Completed
   if (completed) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-muted/30 p-4">
-        <Card className="w-full max-w-md">
-          <CardContent className="py-12 text-center">
-            <CheckCircle2 className="mx-auto h-16 w-16 text-secondary-500" />
-            <h2 className="mt-4 text-2xl font-bold">Thank you!</h2>
-            <p className="mt-2 text-muted-foreground">
-              Your interview has been completed successfully. We appreciate your
-              time and thoughtful responses.
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-    );
+    return <SessionEndedScreen />;
   }
 
   // Creating session

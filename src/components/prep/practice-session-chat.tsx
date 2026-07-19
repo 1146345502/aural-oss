@@ -1220,7 +1220,22 @@ export function PracticeSessionChat({
               variant: "destructive",
             });
           },
-          onPersisted: ({ audioUrl, audioCreatedAt, audioDurationSeconds }) => {
+          onPersisted: ({
+            attemptId,
+            audioUrl,
+            audioCreatedAt,
+            audioDurationSeconds,
+          }) => {
+            if (attemptId) {
+              setMessages((prev) =>
+                prev.map((message) => {
+                  if (message.id !== feedbackId || message.kind !== "feedback") {
+                    return message;
+                  }
+                  return { ...message, attemptId };
+                }),
+              );
+            }
             if (!audioUrl) return;
             setMessages((prev) =>
               prev.map((message) => {
@@ -1630,18 +1645,10 @@ export function PracticeSessionChat({
             (message?.questionIndex ?? questionIndex) + 1,
           );
           break;
-        case "draft": {
-          const text = message?.answerText ?? draftRef.current;
-          const targetQuestionId =
-            message?.questionId ?? activePrompt?.questionId;
-          if (!text?.trim() || !targetQuestionId) return;
-          savePracticeDraft(sessionId, targetQuestionId, text);
-          if (message) setNextMoveDismissedId(message.id);
-          toast({
-            title: "Draft saved",
-            description:
-              "Your answer will be prefilled when you come back to this question.",
-          });
+        case "answer_bank": {
+          const attemptId = message?.attemptId;
+          if (!attemptId) return;
+          handleToggleBookmark(attemptId);
           break;
         }
         case "real_interview": {
@@ -1664,14 +1671,13 @@ export function PracticeSessionChat({
       activePrompt,
       currentQuestion,
       getActiveComposerControl,
+      handleToggleBookmark,
       latestFeedback,
       navigateToQuestion,
       interviewId,
       previewMutation,
       questionIndex,
       questions,
-      sessionId,
-      toast,
     ],
   );
 
@@ -2396,6 +2402,12 @@ function ChatMessageView({
                   feedback={normalizeFeedback(message.feedback)}
                   canNext={canNextQuestion}
                   disabled={actionsDisabled}
+                  attemptId={message.attemptId}
+                  bookmarked={
+                    message.attemptId
+                      ? (bookmarkedAttemptIds?.has(message.attemptId) ?? false)
+                      : false
+                  }
                   onAction={(action) => onNextAction(action, message)}
                 />
               ) : null}
@@ -2556,7 +2568,7 @@ function FeedbackCardShell({
         coachSpeaking ? "ai-border-spin p-[1.5px]" : "border border-border bg-card",
       )}
     >
-      <div className="relative overflow-hidden rounded-[10px] bg-card">
+      <div className="relative z-[1] min-w-0 overflow-hidden rounded-[10px] bg-card">
         {children}
       </div>
     </div>

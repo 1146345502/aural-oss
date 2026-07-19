@@ -7,6 +7,12 @@ import {
 } from "@/components/code-editor/code-editor-canvas";
 import { IntervieweeHelpPopover } from "@/components/session/interviewee-help-popover";
 import {
+  normalizeSessionEndReason,
+  SessionEndedScreen,
+  type SessionEndReason,
+  type SessionEndReasonInput,
+} from "@/components/session/session-ended-screen";
+import {
     AlertDialog,
     AlertDialogAction,
     AlertDialogCancel,
@@ -18,7 +24,6 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -38,7 +43,6 @@ import { useVoice, type InterviewContext } from "@/hooks/use-voice";
 import {
     AlertCircle,
     Check,
-    CheckCircle2,
     ChevronLeft,
     ChevronRight,
     ChevronDown,
@@ -371,7 +375,7 @@ interface VoiceInterfaceProps {
   initialMessages?: Array<{ id: string; role: string; content: string }>;
   initialDrawings?: Array<{ id: string; label: string; snapshotData: string }>;
   chatEnabled?: boolean;
-  onComplete?: () => void;
+  onComplete?: (reason?: SessionEndReasonInput) => void;
   videoMode?: boolean;
   /** Render in static preview mode — shows full layout without connecting */
   preview?: boolean;
@@ -411,6 +415,9 @@ export function VoiceInterface({
   const [error, setError] = useState<string>("");
   const [isSaving, setIsSaving] = useState(false);
   const [locallyCompleted, setLocallyCompleted] = useState(false);
+  const [localCompletionReason, setLocalCompletionReason] = useState<
+    SessionEndReason | undefined
+  >();
   const [chatOpen, setChatOpen] = useState(false);
   const [isStartingInterview, setIsStartingInterview] = useState(false);
   const [desktopTranscriptCollapsed, setDesktopTranscriptCollapsed] = useState(false);
@@ -430,7 +437,9 @@ export function VoiceInterface({
   const codeEditorRef = useRef<CodeEditorCanvasRef>(null);
   const liveCodeSnapshotRef = useRef<string | null>(null);
   const lastFinalTranscriptRef = useRef("");
-  const handleEndInterviewRef = useRef<() => void>(() => {});
+  const handleEndInterviewRef = useRef<
+    (reason?: SessionEndReasonInput) => void
+  >(() => {});
 
   // ── Countdown timer state ────────────────────────────────────────
   const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
@@ -1183,9 +1192,11 @@ export function VoiceInterface({
 
   // ── Common save-and-end logic ───────────────────────────────────
   const endingRef = useRef(false);
-  const handleEndInterview = useCallback(async () => {
+  const handleEndInterview = useCallback(async (reason?: SessionEndReasonInput) => {
     if (endingRef.current) return;
+    const normalizedReason = normalizeSessionEndReason(reason);
     endingRef.current = true;
+    setLocalCompletionReason(normalizedReason);
     setLocallyCompleted(true);
     setIsSaving(true);
 
@@ -1226,7 +1237,7 @@ export function VoiceInterface({
     } catch (err) {
       console.error("[voice] Failed to end interview cleanly:", err);
     } finally {
-      onComplete?.();
+      onComplete?.(normalizedReason);
     }
   }, [saveAllDrawings, saveAllCodeSnippets, videoMode, recording, sessionId, voice, onComplete]);
 
@@ -1238,7 +1249,7 @@ export function VoiceInterface({
   useEffect(() => {
     if (remainingSeconds !== 0 || timerExpiredRef.current) return;
     timerExpiredRef.current = true;
-    handleEndInterviewRef.current();
+    handleEndInterviewRef.current("INTERVIEW_TIME_LIMIT_REACHED");
   }, [remainingSeconds]);
 
   // ── Scroll transcript to bottom ─────────────────────────────────
@@ -1310,18 +1321,7 @@ export function VoiceInterface({
     return () => clearTimeout(timer);
   }, [voice.isInterviewComplete, locallyCompleted, hasVisibleFarewell]);
   const completionScreen = (
-    <div className="flex min-h-screen items-center justify-center bg-muted/30 p-4">
-      <Card className="w-full max-w-md">
-        <CardContent className="py-12 text-center">
-          <CheckCircle2 className="mx-auto h-16 w-16 text-secondary-500" />
-          <h2 className="mt-4 text-2xl font-bold">Thank you!</h2>
-          <p className="mt-2 text-muted-foreground">
-            Your interview has been completed successfully. We appreciate your
-            time and thoughtful responses.
-          </p>
-        </CardContent>
-      </Card>
-    </div>
+    <SessionEndedScreen reason={localCompletionReason} />
   );
 
   const sortedQuestions = interviewContext.questions.slice().sort((a, b) => a.order - b.order);
@@ -2538,7 +2538,7 @@ export function VoiceInterface({
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={handleEndInterview}
+              onClick={() => handleEndInterview()}
             >
               End Interview
             </AlertDialogAction>

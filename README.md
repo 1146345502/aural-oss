@@ -1,4 +1,9 @@
 <p align="center">
+  <strong>English</strong> &nbsp;·&nbsp;
+  <a href="README.zh-CN.md">简体中文</a>
+</p>
+
+<p align="center">
   <a href="https://aural-ai.com">
     <img src="public/images/marketing/logo.png" alt="Aural" width="80" height="80" />
   </a>
@@ -412,6 +417,7 @@ Edit `.env.local` with your credentials. At minimum you need:
 - Supabase URL and keys
 - One LLM provider API key (`OPENAI_API_KEY` recommended for the main app; `GEMINI_API_KEY` recommended for relay summarization and fallback generation)
 - Voice credentials only if you want voice interviews or voice practice (`DOUBAO_*` for the recommended relay, or `AZURE_OPENAI_*` for the backup relay)
+- Optional `JINA_READER_API_KEY` for higher-rate JD URL imports when a public page blocks direct server-side fetching
 
 **Local Supabase key mapping** — map the keys from `supabase status` output to your `.env.local`:
 
@@ -487,7 +493,7 @@ The practice module lets interview authors and candidates rehearse against an in
 | Practice session | `src/app/(dashboard)/interviews/[id]/prep/`, `src/app/practice/[id]/` | Text or voice rehearsal flow with resumable attempts. |
 | UI components | `src/components/prep/` | Context drawer, answer cards, streamed feedback, suggested answers, follow-ups, and voice input. |
 | API layer | `src/server/routers/prep.ts`, `src/app/api/prep/` | tRPC data mutations plus streaming feedback, follow-up, hint, and leave endpoints. |
-| Data model | `supabase/migrations/004_interview_prep.sql` | Adds interview context fields plus `prep_sessions` and `prep_attempts` tables with RLS. |
+| Data model | `supabase/migrations/004_interview_prep.sql`, `supabase/migrations/005_account_delete_and_answer_bank.sql` | Adds interview context, practice sessions and attempts, the personal answer bank, and RLS policies. |
 
 Practice feedback uses the same LLM provider chain as interview generation. Voice practice also uses the voice relay and Doubao TTS settings from `.env.local`; answer audio is stored in the existing private `recordings` bucket.
 
