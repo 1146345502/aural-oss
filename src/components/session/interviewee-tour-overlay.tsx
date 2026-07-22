@@ -1,5 +1,6 @@
 "use client";
 
+import { getLanguageKey, useTranslations, type Dictionary } from "@/locales";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { getStepIllustration } from "./interviewee-guide-content";
@@ -16,7 +17,13 @@ const PADDING = 8;
 const TOOLTIP_GAP = 12;
 const TOOLTIP_WIDTH = 320;
 
-export function IntervieweeTourOverlay() {
+function toStepKey(id: string): keyof Dictionary["tourOverlay"]["steps"] {
+  return id.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase()) as keyof Dictionary["tourOverlay"]["steps"];
+}
+
+export function IntervieweeTourOverlay({ language }: { language?: string } = {}) {
+  const t = useTranslations(language);
+  const lang = getLanguageKey(language);
   const tour = useIntervieweeTour();
   const [targetRect, setTargetRect] = useState<Rect | null>(null);
   const [tooltipPos, setTooltipPos] = useState({ top: 0, left: 0 });
@@ -101,6 +108,7 @@ export function IntervieweeTourOverlay() {
 
   const { currentStep: step, stepIndex: idx, totalSteps: total } = tour;
   const isLast = idx === total - 1;
+  const stepCopy = step ? t.tourOverlay.steps[toStepKey(step.id)] : null;
 
   const spotlight =
     step && targetRect
@@ -172,7 +180,7 @@ export function IntervieweeTourOverlay() {
       )}
 
       {/* Tooltip */}
-      {spotlight && step && (
+      {spotlight && step && stepCopy && (
         <div
           ref={tooltipRef}
           className="fixed z-[9999] rounded-xl border border-border/50 bg-white shadow-2xl dark:bg-zinc-900"
@@ -181,15 +189,15 @@ export function IntervieweeTourOverlay() {
           <div className="space-y-3 p-4">
             <div className="flex items-center gap-2">
               <span className="inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
-                {idx + 1} of {total}
+                {t.tourOverlay.stepCounter(idx + 1, total)}
               </span>
             </div>
-            {getStepIllustration(step.id)}
+            {getStepIllustration(step.id, lang)}
             <h3 className="text-sm font-bold leading-tight text-foreground">
-              {step.title}
+              {stepCopy.title}
             </h3>
             <p className="text-[13px] leading-relaxed text-muted-foreground">
-              {step.description}
+              {stepCopy.description}
             </p>
             {/* Progress bar */}
             <div className="pt-0.5">
@@ -205,7 +213,7 @@ export function IntervieweeTourOverlay() {
                 onClick={tour.skip}
                 className="text-xs text-muted-foreground transition-colors hover:text-foreground"
               >
-                Skip tour
+                {t.tourOverlay.skipTour}
               </button>
               <div className="flex gap-1.5">
                 {idx > 0 && (
@@ -213,14 +221,14 @@ export function IntervieweeTourOverlay() {
                     onClick={tour.prev}
                     className="inline-flex items-center rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted"
                   >
-                    Back
+                    {t.tourOverlay.back}
                   </button>
                 )}
                 <button
                   onClick={isLast ? tour.skip : tour.next}
                   className="inline-flex items-center rounded-lg bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
                 >
-                  {isLast ? "Done" : "Next"}
+                  {isLast ? t.tourOverlay.done : t.tourOverlay.next}
                 </button>
               </div>
             </div>

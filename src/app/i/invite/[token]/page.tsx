@@ -83,7 +83,8 @@ export default function InvitePage() {
 
   // Completed
   if (completed) {
-    return <SessionEndedScreen />;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return <SessionEndedScreen language={(candidate.data as any).interview?.language} />;
   }
 
   // Creating session

@@ -70,7 +70,7 @@ export default function InviteSessionPage() {
   }
 
   if (completed || session.status === "COMPLETED") {
-    return <SessionEndedScreen reason={completionReason} />;
+    return <SessionEndedScreen reason={completionReason} language={interview.language} />;
   }
 
   if (!onboardingDone) {
@@ -113,7 +113,7 @@ export default function InviteSessionPage() {
 
     return (
       <>
-        <AntiCheatingGuard enabled={!!interview.antiCheatingEnabled} sessionId={session.id} />
+        <AntiCheatingGuard enabled={!!interview.antiCheatingEnabled} sessionId={session.id} language={interview.language} />
         <VoiceInterface
           sessionId={session.id}
           interviewId={interview.id}
@@ -132,7 +132,7 @@ export default function InviteSessionPage() {
 
   return (
     <>
-      <AntiCheatingGuard enabled={!!interview.antiCheatingEnabled} sessionId={session.id} />
+      <AntiCheatingGuard enabled={!!interview.antiCheatingEnabled} sessionId={session.id} language={interview.language} />
       <ChatInterface
         sessionId={session.id}
         interview={{

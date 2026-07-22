@@ -3,6 +3,7 @@
 import type { AntiCheatingViolation } from "@/hooks/use-anti-cheating";
 import { useAntiCheating } from "@/hooks/use-anti-cheating";
 import { useToast } from "@/hooks/use-toast";
+import { useTranslations } from "@/locales";
 import { trpc } from "@/lib/trpc/client";
 import { AlertTriangle } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
@@ -10,9 +11,11 @@ import { useCallback, useRef, useState } from "react";
 interface AntiCheatingGuardProps {
   enabled: boolean;
   sessionId?: string;
+  language?: string;
 }
 
-export function AntiCheatingGuard({ enabled, sessionId }: AntiCheatingGuardProps) {
+export function AntiCheatingGuard({ enabled, sessionId, language }: AntiCheatingGuardProps) {
+  const t = useTranslations(language);
   const { toast } = useToast();
   const [warningOpen, setWarningOpen] = useState(false);
   const [departureCount, setDepartureCount] = useState(0);
@@ -58,23 +61,21 @@ export function AntiCheatingGuard({ enabled, sessionId }: AntiCheatingGuardProps
           if (now - lastPasteToast.current < 3000) return;
           lastPasteToast.current = now;
           toast({
-            title: ((<span className="text-red-600 dark:text-red-400">External paste blocked</span>) as unknown as string),
-            description:
-              "Pasting content from outside the interview is not allowed.",
+            title: ((<span className="text-red-600 dark:text-red-400">{t.antiCheatingBanner.pasteBlockedTitle}</span>) as unknown as string),
+            description: t.antiCheatingBanner.pasteBlockedBody,
           });
           break;
         }
 
         case "multi_screen":
           toast({
-            title: ((<span className="text-red-600 dark:text-red-400">Additional display detected</span>) as unknown as string),
-            description:
-              "For the best experience, please use a single screen during this interview.",
+            title: ((<span className="text-red-600 dark:text-red-400">{t.antiCheatingBanner.multiScreenTitle}</span>) as unknown as string),
+            description: t.antiCheatingBanner.multiScreenBody,
           });
           break;
       }
     },
-    [toast, recordDeparture, persistViolation],
+    [toast, recordDeparture, persistViolation, t],
   );
 
   useAntiCheating({ enabled, onViolation: handleViolation });
@@ -90,22 +91,20 @@ export function AntiCheatingGuard({ enabled, sessionId }: AntiCheatingGuardProps
           </div>
 
           <h2 className="mt-4 text-lg font-semibold text-gray-900 dark:text-gray-100">
-            Page departure detected
+            {t.antiCheatingBanner.departureTitle}
           </h2>
 
           <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-            You have left the interview page{" "}
+            {t.antiCheatingBanner.departureBody}{" "}
             <span className="font-semibold text-red-600 dark:text-red-400">
-              {departureCount} {departureCount === 1 ? "time" : "times"}
+              {t.antiCheatingBanner.departureCount(departureCount)}
             </span>
-            . All departures are recorded and may be reviewed. Excessive
-            departures could affect the evaluation of your session.
+            {t.antiCheatingBanner.departureSuffix}
           </p>
 
           {departureCount >= 3 && (
             <div className="mt-3 w-full rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-700 dark:bg-red-950/30 dark:text-red-300">
-              Warning: You have reached the maximum number of allowed
-              departures. Further departures will be flagged for review.
+              {t.antiCheatingBanner.departureMaxWarning}
             </div>
           )}
 
@@ -113,7 +112,7 @@ export function AntiCheatingGuard({ enabled, sessionId }: AntiCheatingGuardProps
             onClick={() => setWarningOpen(false)}
             className="mt-5 w-full rounded-lg bg-red-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 dark:bg-red-700 dark:hover:bg-red-600"
           >
-            I understand, continue interview
+            {t.antiCheatingBanner.understandContinue}
           </button>
         </div>
       </div>

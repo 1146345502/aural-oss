@@ -80,7 +80,7 @@ export default function SlugSessionPage() {
 
   if (session.data.status === "COMPLETED" || completed) {
     try { localStorage.removeItem(STORAGE_PREFIX + slug); } catch { /* noop */ }
-    return <SessionEndedScreen reason={completionReason} />;
+    return <SessionEndedScreen reason={completionReason} language={interview.data.language} />;
   }
 
   if (!onboardingDone) {
@@ -154,7 +154,7 @@ export default function SlugSessionPage() {
 
     return (
       <IntervieweeTourProvider mode={mode}>
-        <PreviewWrapper onReady={handleTourReady}>
+        <PreviewWrapper onReady={handleTourReady} language={interview.data.language}>
           {mode === "voice" ? (
             <VoiceInterface
               sessionId="__preview__"
@@ -176,6 +176,7 @@ export default function SlugSessionPage() {
                 title: interview.data.title,
                 aiName: interview.data.aiName ?? "AI Interviewer",
                 mode: "CHAT",
+                language: interview.data.language,
                 questions: mockContext.questions.map((q, i) => ({
                   id: `preview-q-${i}`,
                   text: q.text,
@@ -188,7 +189,7 @@ export default function SlugSessionPage() {
             />
           )}
         </PreviewWrapper>
-        <IntervieweeTourOverlay />
+        <IntervieweeTourOverlay language={interview.data.language} />
       </IntervieweeTourProvider>
     );
   }
@@ -214,7 +215,7 @@ export default function SlugSessionPage() {
 
     return (
       <>
-        <AntiCheatingGuard enabled={antiCheatingEnabled} sessionId={sessionId!} />
+        <AntiCheatingGuard enabled={antiCheatingEnabled} sessionId={sessionId!} language={interview.data.language} />
         <VoiceInterface
           sessionId={sessionId!}
           interviewId={interview.data.id}
@@ -235,7 +236,7 @@ export default function SlugSessionPage() {
 
   return (
     <>
-      <AntiCheatingGuard enabled={antiCheatingEnabled} sessionId={sessionId!} />
+      <AntiCheatingGuard enabled={antiCheatingEnabled} sessionId={sessionId!} language={interview.data.language} />
       <ChatInterface
         sessionId={sessionId!}
         interview={{

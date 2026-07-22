@@ -40,6 +40,7 @@ import {
 import { useInterviewRecording } from "@/hooks/use-interview-recording";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useVoice, type InterviewContext } from "@/hooks/use-voice";
+import { useTranslations } from "@/locales";
 import {
     AlertCircle,
     Check,
@@ -403,6 +404,7 @@ export function VoiceInterface({
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
   const isMobile = useIsMobile();
+  const t = useTranslations(interviewContext.language);
 
   const [messages, setMessages] = useState<Message[]>(
     () =>
@@ -1321,7 +1323,7 @@ export function VoiceInterface({
     return () => clearTimeout(timer);
   }, [voice.isInterviewComplete, locallyCompleted, hasVisibleFarewell]);
   const completionScreen = (
-    <SessionEndedScreen reason={localCompletionReason} />
+    <SessionEndedScreen reason={localCompletionReason} language={interviewContext.language} />
   );
 
   const sortedQuestions = interviewContext.questions.slice().sort((a, b) => a.order - b.order);
@@ -1514,9 +1516,9 @@ export function VoiceInterface({
       {isSaving && (
         <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-background/80 backdrop-blur-sm">
           <Loader2 className="h-10 w-10 animate-spin text-primary" />
-          <p className="mt-4 text-lg font-medium">Saving interview data...</p>
+          <p className="mt-4 text-lg font-medium">{t.voiceInterface.saving}</p>
           <p className="mt-1 text-sm text-muted-foreground">
-            This will only take a moment.
+            {t.voiceInterface.savingBody}
           </p>
         </div>
       )}
@@ -1527,7 +1529,7 @@ export function VoiceInterface({
           <div className="mr-2 min-w-0 flex-1">
             <h1 className="truncate text-sm font-semibold md:text-base">{interviewTitle}</h1>
             <p className="hidden text-xs text-muted-foreground md:block">
-              Voice Interview with {aiName}
+              {t.voiceInterface.headerSubtitle(aiName)}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -1538,9 +1540,13 @@ export function VoiceInterface({
               </div>
             )}
             <Badge variant={preview ? "outline" : voice.isConnected ? "default" : "secondary"}>
-              {preview ? "Preview" : voice.isConnected ? "Connected" : "Disconnected"}
+              {preview
+                ? t.voiceInterface.preview
+                : voice.isConnected
+                  ? t.voiceInterface.connected
+                  : t.voiceInterface.disconnected}
             </Badge>
-            <IntervieweeHelpPopover mode="voice" />
+            <IntervieweeHelpPopover mode="voice" language={interviewContext.language} />
           </div>
         </div>
         {/* Question progress + timer (mobile: timer in header to avoid blocking bottom buttons) */}
@@ -1552,7 +1558,7 @@ export function VoiceInterface({
           {remainingSeconds !== null && isMobile && (
             <div className={`flex shrink-0 items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-medium tabular-nums ${isTimeLow ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground"}`}>
               <Clock className="h-3 w-3" />
-              <span>{formatTime(remainingSeconds)} left</span>
+              <span>{t.voiceInterface.timeLeft(formatTime(remainingSeconds))}</span>
             </div>
           )}
         </div>
@@ -1584,7 +1590,7 @@ export function VoiceInterface({
                 {voice.isSpeaking && (
                   <div className="flex items-center gap-1.5 text-primary">
                     <Volume2 className="h-4 w-4 animate-pulse" />
-                    <span className="text-xs font-medium">{aiName} speaking</span>
+                    <span className="text-xs font-medium">{t.voiceInterface.aiSpeakingStatusBar(aiName)}</span>
                   </div>
                 )}
                 {voice.isListening && (
@@ -1598,28 +1604,30 @@ export function VoiceInterface({
                         <Mic className="h-full w-full text-secondary-400" />
                       </div>
                     </div>
-                    <span className="text-xs font-medium">Listening</span>
+                    <span className="text-xs font-medium">{t.voiceInterface.statusListening}</span>
                   </div>
                 )}
                 {voice.isProcessing && (
                   <div className="flex items-center gap-1.5 text-muted-foreground">
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    <span className="text-xs font-medium">Thinking</span>
+                    <span className="text-xs font-medium">{t.voiceInterface.statusThinking}</span>
                   </div>
                 )}
                 {voice.isTransitioning && (
                   <div className="flex items-center gap-1.5 text-muted-foreground">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     <span className="text-xs font-medium">
-                      {voice.transitionDirection === "previous" ? "Previous question..." : "Next question..."}
+                      {voice.transitionDirection === "previous"
+                        ? t.voiceInterface.prevQuestionLoading
+                        : t.voiceInterface.nextQuestionLoading}
                     </span>
                   </div>
                 )}
                 {!voice.isSpeaking && !voice.isListening && !voice.isProcessing && !voice.isTransitioning && (
                   <span className="text-xs text-muted-foreground">
                     {voice.isConnected
-                      ? `Voice active — ${whiteboardActive ? "draw" : "code"} freely`
-                      : "Voice disconnected"}
+                      ? t.voiceInterface.voiceActiveFreely(whiteboardActive)
+                      : t.voiceInterface.voiceDisconnected}
                   </span>
                 )}
                 {voice.isListening && voice.userTranscript && (
@@ -1656,7 +1664,7 @@ export function VoiceInterface({
                         className="px-2.5 py-1"
                         onClick={() => switchDrawing(i)}
                         onDoubleClick={() => setEditingDrawingId(d.id)}
-                        title="Double-click to rename"
+                        title={t.voiceInterface.doubleClickRename}
                       >
                         {d.label}
                       </button>
@@ -1669,7 +1677,7 @@ export function VoiceInterface({
                             ? "hover:bg-primary-foreground/20"
                             : "hover:bg-muted-foreground/20"
                         }`}
-                        title="Delete drawing"
+                        title={t.voiceInterface.deleteDrawing}
                       >
                         <X className="h-3 w-3" />
                       </button>
@@ -1679,10 +1687,10 @@ export function VoiceInterface({
                 <button
                   onClick={addNewDrawing}
                   className="flex items-center gap-0.5 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted"
-                  title="New drawing"
+                  title={t.voiceInterface.newDrawing}
                 >
                   <Plus className="h-3 w-3" />
-                  New
+                  {t.voiceInterface.new}
                 </button>
                 <div className="ml-auto">
                   <button
@@ -1693,7 +1701,7 @@ export function VoiceInterface({
                         ? "text-secondary-600 dark:text-secondary-400"
                         : "text-muted-foreground hover:bg-muted"
                     }`}
-                    title="Save drawing"
+                    title={t.voiceInterface.saveDrawing}
                   >
                     {saveStatus === "saving" ? (
                       <Loader2 className="h-3 w-3 animate-spin" />
@@ -1702,7 +1710,7 @@ export function VoiceInterface({
                     ) : (
                       <Save className="h-3 w-3" />
                     )}
-                    {saveStatus === "saved" ? "Saved" : "Save"}
+                    {saveStatus === "saved" ? t.voiceInterface.saved : t.voiceInterface.save}
                   </button>
                 </div>
               </div>
@@ -1733,7 +1741,7 @@ export function VoiceInterface({
                         className="px-2.5 py-1"
                         onClick={() => switchCodeSnippet(i)}
                         onDoubleClick={() => setEditingSnippetId(s.id)}
-                        title="Double-click to rename"
+                        title={t.voiceInterface.doubleClickRename}
                       >
                         {s.label}
                       </button>
@@ -1746,7 +1754,7 @@ export function VoiceInterface({
                             ? "hover:bg-primary-foreground/20"
                             : "hover:bg-muted-foreground/20"
                         }`}
-                        title="Delete snippet"
+                        title={t.voiceInterface.deleteSnippet}
                       >
                         <X className="h-3 w-3" />
                       </button>
@@ -1756,10 +1764,10 @@ export function VoiceInterface({
                 <button
                   onClick={addNewCodeSnippet}
                   className="flex items-center gap-0.5 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted"
-                  title="New snippet"
+                  title={t.voiceInterface.newSnippet}
                 >
                   <Plus className="h-3 w-3" />
-                  New
+                  {t.voiceInterface.new}
                 </button>
                 <div className="ml-auto">
                   <button
@@ -1770,7 +1778,7 @@ export function VoiceInterface({
                         ? "text-secondary-600 dark:text-secondary-400"
                         : "text-muted-foreground hover:bg-muted"
                     }`}
-                    title="Save snippet"
+                    title={t.voiceInterface.saveSnippet}
                   >
                     {codeSaveStatus === "saving" ? (
                       <Loader2 className="h-3 w-3 animate-spin" />
@@ -1779,7 +1787,7 @@ export function VoiceInterface({
                     ) : (
                       <Save className="h-3 w-3" />
                     )}
-                    {codeSaveStatus === "saved" ? "Saved" : "Save"}
+                    {codeSaveStatus === "saved" ? t.voiceInterface.saved : t.voiceInterface.save}
                   </button>
                 </div>
               </div>
@@ -1796,7 +1804,7 @@ export function VoiceInterface({
                     >
                       <div className="mb-3 flex items-center gap-2">
                         <FileText className="h-4 w-4 text-muted-foreground" />
-                        <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Problem</span>
+                        <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t.voiceInterface.problem}</span>
                       </div>
                       <p className="mb-3 text-sm font-medium leading-snug">{currentQVoice.text}</p>
                       {currentQVoice.description && (
@@ -1839,7 +1847,7 @@ export function VoiceInterface({
                     >
                       <div className="mb-3 flex items-center gap-2">
                         <FileText className="h-4 w-4 text-muted-foreground" />
-                        <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Problem</span>
+                        <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t.voiceInterface.problem}</span>
                       </div>
                       <p className="mb-3 text-sm font-medium leading-snug">{currentQVoice.text}</p>
                       {currentQVoice.description && (
@@ -1850,7 +1858,7 @@ export function VoiceInterface({
                           <div className="flex items-center gap-1.5 border-b border-zinc-800 bg-zinc-900 px-3 py-1.5">
                             <Code2 className="h-3 w-3 text-zinc-400" />
                             <span className="text-[10px] font-medium uppercase tracking-wide text-zinc-400">
-                              Starter Code — {currentQVoice.starterCode.language}
+                              {t.voiceInterface.starterCode} — {currentQVoice.starterCode.language}
                             </span>
                           </div>
                           <CodeBlock code={currentQVoice.starterCode.code} language={currentQVoice.starterCode.language} />
@@ -1919,7 +1927,9 @@ export function VoiceInterface({
                   <div className="flex items-center gap-2 text-muted-foreground">
                     <Loader2 className="h-5 w-5 animate-spin" />
                     <span className="text-sm font-medium">
-                      {voice.transitionDirection === "previous" ? "Preparing previous question..." : "Preparing next question..."}
+                      {voice.transitionDirection === "previous"
+                        ? t.voiceInterface.preparingPrevQuestion
+                        : t.voiceInterface.preparingNextQuestion}
                     </span>
                   </div>
                 )}
@@ -1927,7 +1937,7 @@ export function VoiceInterface({
                   <div className="flex flex-col items-center gap-3">
                     <div className="flex items-center gap-2 text-muted-foreground">
                       <Loader2 className="h-5 w-5 animate-spin" />
-                      <span className="text-sm font-medium">Thinking...</span>
+                      <span className="text-sm font-medium">{t.voiceInterface.thinkingDots}</span>
                     </div>
                     {(() => {
                       const lastUserMsg = messages.filter((m) => m.role === "user").pop();
@@ -1943,7 +1953,7 @@ export function VoiceInterface({
                 {showVoiceSpeaking && (
                   <div className="flex items-center gap-2 text-primary">
                     <Volume2 className="h-5 w-5 animate-pulse" />
-                    <span className="text-sm font-medium">{aiName} is speaking...</span>
+                    <span className="text-sm font-medium">{t.voiceInterface.aiSpeaking(aiName)}</span>
                   </div>
                 )}
                 {showVoiceListening && (
@@ -1958,7 +1968,7 @@ export function VoiceInterface({
                         <Mic className="h-full w-full text-secondary-400" />
                       </div>
                     </div>
-                    <span className="text-sm font-medium text-secondary-500">Listening...</span>
+                    <span className="text-sm font-medium text-secondary-500">{t.voiceInterface.listeningDots}</span>
                   </div>
                 )}
 
@@ -2020,29 +2030,31 @@ export function VoiceInterface({
                   ) : (
                     <Mic className="h-5 w-5" />
                   )}
-                  {isStartingInterview ? "Connecting..." : "Start Voice Interview"}
+                  {isStartingInterview
+                    ? t.voiceInterface.connecting
+                    : t.voiceInterface.startVoiceInterview}
                 </Button>
               )}
 
               {!voice.isConnected && !preview && isStartingInterview && (
                 <p className="text-sm text-muted-foreground">
-                  Connecting to the interview. This can take a few seconds.
+                  {t.voiceInterface.connectingBody}
                 </p>
               )}
 
               {preview && (
                 <p className="text-sm text-muted-foreground">
-                  This is where the voice conversation happens
+                  {t.voiceInterface.previewPlaceholder}
                 </p>
               )}
               {voice.isConnected && !showVoiceListening && !showVoiceProcessing && !showVoiceSpeaking && (
                 <p className="text-sm text-muted-foreground">
-                  Click the mic to start speaking
+                  {t.voiceInterface.clickMicToStart}
                 </p>
               )}
               {voice.isConnected && showVoiceListening && (
                 <p className="text-sm text-muted-foreground">
-                  Speak naturally — AI will respond automatically
+                  {t.voiceInterface.speakNaturally}
                 </p>
               )}
               </div>
@@ -2069,7 +2081,7 @@ export function VoiceInterface({
                     className="flex shrink-0 items-center justify-between border-b px-4 py-2 text-left"
                     onClick={() => setMobileTranscriptCollapsed((prev) => !prev)}
                   >
-                    <p className="text-xs font-medium text-muted-foreground">Transcript</p>
+                    <p className="text-xs font-medium text-muted-foreground">{t.voiceInterface.transcript}</p>
                     {mobileTranscriptCollapsed ? (
                       <ChevronDown className="h-4 w-4 text-muted-foreground" />
                     ) : (
@@ -2085,21 +2097,21 @@ export function VoiceInterface({
                               <Volume2 className="mt-0.5 h-3 w-3 shrink-0 text-primary/60" />
                               <div>
                                 <span className="font-medium text-primary">{aiName}:</span>{" "}
-                                Welcome! Let&apos;s begin the interview. Could you start by telling me about yourself?
+                                {t.voiceInterface.welcomeSample}
                               </div>
                             </div>
                             <div className="flex items-start gap-1.5 text-sm">
                               <Mic className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
                               <div>
-                                <span className="font-medium text-secondary-600 dark:text-secondary-400">You:</span>{" "}
-                                Sure, I have been working as a software engineer for...
+                                <span className="font-medium text-secondary-600 dark:text-secondary-400">{t.voiceInterface.youLabel}</span>{" "}
+                                {t.voiceInterface.sampleAnswer}
                               </div>
                             </div>
-                            <p className="text-center text-xs text-muted-foreground italic">(sample transcript)</p>
+                            <p className="text-center text-xs text-muted-foreground italic">{t.voiceInterface.sampleTranscriptNote}</p>
                           </>
                         ) : messages.length === 0 && !voice.aiTranscript && !voice.userTranscript ? (
                           <p className="py-8 text-center text-sm text-muted-foreground">
-                            Transcript will appear here once the conversation starts.
+                            {t.voiceInterface.transcriptEmpty}
                           </p>
                         ) : (
                           <>
@@ -2120,7 +2132,7 @@ export function VoiceInterface({
                                         : "text-primary"
                                     }`}
                                   >
-                                    {msg.role === "user" ? "You" : aiName}:
+                                    {msg.role === "user" ? t.voiceInterface.you : aiName}:
                                   </span>{" "}
                                   {msg.content}
                                 </div>
@@ -2130,7 +2142,7 @@ export function VoiceInterface({
                               <div className="flex items-start gap-1.5 text-sm animate-pulse">
                                 <Mic className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
                                 <div>
-                                  <span className="font-medium text-secondary-600 dark:text-secondary-400">You:</span>{" "}
+                                  <span className="font-medium text-secondary-600 dark:text-secondary-400">{t.voiceInterface.youLabel}</span>{" "}
                                   <span className="text-muted-foreground">{voice.userTranscript}</span>
                                 </div>
                               </div>
@@ -2138,7 +2150,7 @@ export function VoiceInterface({
                             {voice.isProcessing && !voice.aiTranscript && (
                               <div className="flex items-start gap-1.5 text-sm text-muted-foreground">
                                 <Loader2 className="mt-0.5 h-3 w-3 shrink-0 animate-spin text-primary/60" />
-                                <span className="text-xs italic">Thinking...</span>
+                                <span className="text-xs italic">{t.voiceInterface.thinkingDots}</span>
                               </div>
                             )}
                             {voice.aiTranscript && (() => {
@@ -2191,7 +2203,7 @@ export function VoiceInterface({
                 className="text-[11px] font-medium uppercase tracking-[0.2em]"
                 style={{ writingMode: "vertical-rl", textOrientation: "mixed" }}
               >
-                Transcript
+                {t.voiceInterface.transcript}
               </span>
             </button>
           ) : (
@@ -2211,7 +2223,7 @@ export function VoiceInterface({
                   className="flex items-center justify-between border-b px-4 py-2 text-left"
                   onClick={() => setDesktopTranscriptCollapsed(true)}
                 >
-                  <p className="text-xs font-medium text-muted-foreground">Transcript</p>
+                  <p className="text-xs font-medium text-muted-foreground">{t.voiceInterface.transcript}</p>
                   <ChevronRight className="h-4 w-4 text-muted-foreground" />
                 </button>
                 <ScrollArea className="min-h-0 flex-1">
@@ -2222,21 +2234,21 @@ export function VoiceInterface({
                           <Volume2 className="mt-0.5 h-3 w-3 shrink-0 text-primary/60" />
                           <div>
                             <span className="font-medium text-primary">{aiName}:</span>{" "}
-                            Welcome! Let&apos;s begin the interview. Could you start by telling me about yourself?
+                            {t.voiceInterface.welcomeSample}
                           </div>
                         </div>
                         <div className="flex items-start gap-1.5 text-sm">
                           <Mic className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
                           <div>
-                            <span className="font-medium text-secondary-600 dark:text-secondary-400">You:</span>{" "}
-                            Sure, I have been working as a software engineer for...
+                            <span className="font-medium text-secondary-600 dark:text-secondary-400">{t.voiceInterface.youLabel}</span>{" "}
+                            {t.voiceInterface.sampleAnswer}
                           </div>
                         </div>
-                        <p className="text-center text-xs text-muted-foreground italic">(sample transcript)</p>
+                        <p className="text-center text-xs text-muted-foreground italic">{t.voiceInterface.sampleTranscriptNote}</p>
                       </>
                     ) : messages.length === 0 && !voice.aiTranscript && !voice.userTranscript ? (
                       <p className="py-8 text-center text-sm text-muted-foreground">
-                        Transcript will appear here once the conversation starts.
+                        {t.voiceInterface.transcriptEmpty}
                       </p>
                     ) : (
                       <>
@@ -2257,7 +2269,7 @@ export function VoiceInterface({
                                     : "text-primary"
                                 }`}
                               >
-                                {msg.role === "user" ? "You" : aiName}:
+                                {msg.role === "user" ? t.voiceInterface.you : aiName}:
                               </span>{" "}
                               {msg.content}
                             </div>
@@ -2267,7 +2279,7 @@ export function VoiceInterface({
                           <div className="flex items-start gap-1.5 text-sm animate-pulse">
                             <Mic className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
                             <div>
-                              <span className="font-medium text-secondary-600 dark:text-secondary-400">You:</span>{" "}
+                              <span className="font-medium text-secondary-600 dark:text-secondary-400">{t.voiceInterface.youLabel}</span>{" "}
                               <span className="text-muted-foreground">{voice.userTranscript}</span>
                             </div>
                           </div>
@@ -2275,7 +2287,7 @@ export function VoiceInterface({
                         {voice.isProcessing && !voice.aiTranscript && (
                           <div className="flex items-start gap-1.5 text-sm text-muted-foreground">
                             <Loader2 className="mt-0.5 h-3 w-3 shrink-0 animate-spin text-primary/60" />
-                            <span className="text-xs italic">Thinking...</span>
+                            <span className="text-xs italic">{t.voiceInterface.thinkingDots}</span>
                           </div>
                         )}
                         {voice.aiTranscript && (() => {
@@ -2313,13 +2325,13 @@ export function VoiceInterface({
                   style={{ height: `${100 - chatSplitPercent}%` }}
                 >
                   <div className="flex items-center border-b px-4 py-2">
-                    <p className="text-xs font-medium text-muted-foreground">Chat</p>
+                    <p className="text-xs font-medium text-muted-foreground">{t.voiceInterface.chat}</p>
                   </div>
                   <ScrollArea className="min-h-0 flex-1">
                     <div className="space-y-3 p-4">
                       {chatMessages.length === 0 ? (
                         <p className="py-4 text-center text-xs text-muted-foreground">
-                          Send a message to start chatting.
+                          {t.voiceInterface.sendMessageToStart}
                         </p>
                       ) : (
                         chatMessages.map((msg) => (
@@ -2337,7 +2349,7 @@ export function VoiceInterface({
                       ref={chatInputRef}
                       value={chatInput}
                       onChange={(e) => setChatInput(e.target.value)}
-                      placeholder="Type a message..."
+                      placeholder={t.voiceInterface.typeMessage}
                       className="h-8 flex-1 text-sm"
                       onKeyDown={(e) => {
                         if (e.key === "Enter" && !e.shiftKey && chatInput.trim()) {
@@ -2376,7 +2388,7 @@ export function VoiceInterface({
           {remainingSeconds !== null && !isMobile && (
             <div className={`absolute right-3 flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium tabular-nums md:right-6 md:px-2.5 ${isTimeLow ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground"}`}>
               <Clock className="h-3.5 w-3.5" />
-              <span>{formatTime(remainingSeconds)} left</span>
+              <span>{t.voiceInterface.timeLeft(formatTime(remainingSeconds))}</span>
             </div>
           )}
           {/* Mic toggle */}
@@ -2404,7 +2416,7 @@ export function VoiceInterface({
               )}
             </Button>
             <span className="hidden text-[10px] text-muted-foreground md:block">
-              {voice.isListening ? "Mute" : "Unmute"}
+              {voice.isListening ? t.voiceInterface.mute : t.voiceInterface.unmute}
             </span>
           </div>
 
@@ -2419,7 +2431,7 @@ export function VoiceInterface({
               >
                 <MessageSquare className="h-4 w-4" />
               </Button>
-              <span className="hidden text-[10px] text-muted-foreground md:block">Chat</span>
+              <span className="hidden text-[10px] text-muted-foreground md:block">{t.voiceInterface.chat}</span>
             </div>
           )}
 
@@ -2434,7 +2446,7 @@ export function VoiceInterface({
               >
                 <PenLine className="h-4 w-4" />
               </Button>
-              <span className="hidden text-[10px] text-muted-foreground md:block">Whiteboard</span>
+              <span className="hidden text-[10px] text-muted-foreground md:block">{t.voiceInterface.whiteboard}</span>
             </div>
 
             <div className="flex flex-col items-center gap-0.5">
@@ -2446,7 +2458,7 @@ export function VoiceInterface({
               >
                 <Code2 className="h-4 w-4" />
               </Button>
-              <span className="hidden text-[10px] text-muted-foreground md:block">Code</span>
+              <span className="hidden text-[10px] text-muted-foreground md:block">{t.voiceInterface.code}</span>
             </div>
           </div>
 
@@ -2469,7 +2481,7 @@ export function VoiceInterface({
                   <SkipBack className="h-4 w-4" />
                 )}
               </Button>
-              <span className="hidden text-[10px] text-muted-foreground md:block">Previous</span>
+              <span className="hidden text-[10px] text-muted-foreground md:block">{t.voiceInterface.previous}</span>
             </div>
 
             <div className="flex flex-col items-center gap-0.5">
@@ -2489,7 +2501,7 @@ export function VoiceInterface({
                   <SkipForward className="h-4 w-4" />
                 )}
               </Button>
-              <span className="hidden text-[10px] text-muted-foreground md:block">Next</span>
+              <span className="hidden text-[10px] text-muted-foreground md:block">{t.voiceInterface.next}</span>
             </div>
 
             <div className="flex flex-col items-center gap-0.5">
@@ -2501,7 +2513,7 @@ export function VoiceInterface({
               >
                 <PhoneOff className="h-4 w-4" />
               </Button>
-              <span className="hidden text-[10px] text-muted-foreground md:block">End</span>
+              <span className="hidden text-[10px] text-muted-foreground md:block">{t.voiceInterface.end}</span>
             </div>
           </div>
         </div>
@@ -2520,7 +2532,7 @@ export function VoiceInterface({
           />
           <div className="absolute bottom-1 left-1 flex items-center gap-1 rounded bg-black/60 px-1.5 py-0.5">
             <Video className="h-2.5 w-2.5 text-white" />
-            <span className="text-[9px] text-white">Camera</span>
+            <span className="text-[9px] text-white">{t.voiceInterface.camera}</span>
           </div>
         </DraggablePip>
       )}
@@ -2529,18 +2541,18 @@ export function VoiceInterface({
       <AlertDialog open={showEndDialog} onOpenChange={setShowEndDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>End interview?</AlertDialogTitle>
+            <AlertDialogTitle>{t.voiceInterface.endInterviewTitle}</AlertDialogTitle>
             <AlertDialogDescription>
-              This will save your progress and end the current interview session. You won&apos;t be able to continue after this.
+              {t.voiceInterface.endInterviewBody}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t.voiceInterface.cancel}</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={() => handleEndInterview()}
             >
-              End Interview
+              {t.voiceInterface.endInterview}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -2555,13 +2567,13 @@ export function VoiceInterface({
             onOpenAutoFocus={(e) => e.preventDefault()}
           >
             <SheetHeader className="shrink-0 border-b px-4 py-3">
-              <SheetTitle className="text-sm">Chat</SheetTitle>
+              <SheetTitle className="text-sm">{t.voiceInterface.chat}</SheetTitle>
             </SheetHeader>
             <ScrollArea className="min-h-0 flex-1">
               <div className="space-y-3 p-4">
                 {messages.length === 0 && !voice.aiTranscript && !voice.userTranscript ? (
                   <p className="py-8 text-center text-sm text-muted-foreground">
-                    Transcript will appear here once the conversation starts.
+                    {t.voiceInterface.transcriptEmpty}
                   </p>
                 ) : (
                   <>
@@ -2582,7 +2594,7 @@ export function VoiceInterface({
                                 : "text-primary"
                             }`}
                           >
-                            {msg.role === "user" ? "You" : aiName}:
+                            {msg.role === "user" ? t.voiceInterface.you : aiName}:
                           </span>{" "}
                           {msg.content}
                         </div>
@@ -2592,7 +2604,7 @@ export function VoiceInterface({
                       <div className="flex items-start gap-1.5 text-sm animate-pulse">
                         <Mic className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
                         <div>
-                          <span className="font-medium text-secondary-600 dark:text-secondary-400">You:</span>{" "}
+                          <span className="font-medium text-secondary-600 dark:text-secondary-400">{t.voiceInterface.youLabel}</span>{" "}
                           <span className="text-muted-foreground">{voice.userTranscript}</span>
                         </div>
                       </div>
@@ -2620,7 +2632,7 @@ export function VoiceInterface({
                 ref={chatInputRef}
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
-                placeholder="Type a message..."
+                placeholder={t.voiceInterface.typeMessage}
                 className="h-8 flex-1 text-base md:text-sm"
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey && chatInput.trim()) {

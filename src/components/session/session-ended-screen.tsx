@@ -1,6 +1,7 @@
 "use client";
 
 import { Card, CardContent } from "@/components/ui/card";
+import { useTranslations, type Dictionary } from "@/locales";
 import { AlertTriangle, CheckCircle2, Clock3 } from "lucide-react";
 
 export type SessionEndReason =
@@ -29,45 +30,42 @@ export function normalizeSessionEndReason(
   return "COMPLETED";
 }
 
-const endReasonCopy: Record<
-  SessionEndReason,
-  {
-    description: string;
-    icon: typeof CheckCircle2;
-    iconClassName: string;
-    title: string;
+function getEndReasonCopy(t: Dictionary, reason: SessionEndReason) {
+  switch (reason) {
+    case "INTERVIEW_TIME_LIMIT_REACHED":
+      return {
+        icon: Clock3,
+        iconClassName: "text-amber-600",
+        title: t.sessionEndedScreen.interviewTimeLimit.title,
+        description: t.sessionEndedScreen.interviewTimeLimit.description,
+      };
+    case "ACCOUNT_SESSION_TIME_LIMIT_REACHED":
+      return {
+        icon: AlertTriangle,
+        iconClassName: "text-amber-600",
+        title: t.sessionEndedScreen.accountTimeLimit.title,
+        description: t.sessionEndedScreen.accountTimeLimit.description,
+      };
+    default:
+      return {
+        icon: CheckCircle2,
+        iconClassName: "text-secondary-500",
+        title: t.sessionEndedScreen.completed.title,
+        description: t.sessionEndedScreen.completed.description,
+      };
   }
-> = {
-  COMPLETED: {
-    icon: CheckCircle2,
-    iconClassName: "text-secondary-500",
-    title: "Thank you!",
-    description:
-      "Your interview has been completed successfully. We appreciate your time and thoughtful responses.",
-  },
-  INTERVIEW_TIME_LIMIT_REACHED: {
-    icon: Clock3,
-    iconClassName: "text-amber-600",
-    title: "Interview time limit reached",
-    description:
-      "This interview reached its configured time limit and was submitted automatically. Thank you for your time and responses.",
-  },
-  ACCOUNT_SESSION_TIME_LIMIT_REACHED: {
-    icon: AlertTriangle,
-    iconClassName: "text-amber-600",
-    title: "Session time limit reached",
-    description:
-      "This interview ended because the organization's available session time was used up. Your responses were saved, but please contact the interviewer if you need to continue.",
-  },
-};
+}
 
 export function SessionEndedScreen({
   reason,
+  language,
 }: {
   reason?: SessionEndReasonInput;
+  language?: string;
 }) {
+  const t = useTranslations(language);
   const normalizedReason = normalizeSessionEndReason(reason);
-  const copy = endReasonCopy[normalizedReason];
+  const copy = getEndReasonCopy(t, normalizedReason);
   const Icon = copy.icon;
 
   return (

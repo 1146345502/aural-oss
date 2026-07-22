@@ -28,6 +28,7 @@ import {
     useSessionToolChunkPrefetch,
 } from "@/hooks/use-chunk-load-recovery";
 import { useIsMobile } from "@/hooks/use-is-mobile";
+import { useTranslations } from "@/locales";
 import { cn } from "@/lib/utils";
 import {
     Check,
@@ -55,6 +56,7 @@ interface Interview {
   title: string;
   aiName: string;
   mode: string;
+  language?: string;
   questions: {
     id: string;
     text: string;
@@ -95,6 +97,7 @@ export function ChatInterface({
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
   const isMobile = useIsMobile();
+  const t = useTranslations(interview.language);
 
   const [messages, setMessages] = useState<Message[]>(initialMessages ?? []);
   const [input, setInput] = useState("");
@@ -1116,7 +1119,7 @@ export function ChatInterface({
               className="px-2.5 py-1"
               onClick={() => switchCodeSnippet(i)}
               onDoubleClick={() => setEditingSnippetId(s.id)}
-              title="Double-click to rename"
+              title={t.chatInterface.doubleClickRename}
             >
               {s.label}
             </button>
@@ -1129,7 +1132,7 @@ export function ChatInterface({
                   ? "hover:bg-primary-foreground/20"
                   : "hover:bg-muted-foreground/20"
               }`}
-              title="Delete snippet"
+              title={t.chatInterface.deleteSnippet}
             >
               <X className="h-3 w-3" />
             </button>
@@ -1139,10 +1142,10 @@ export function ChatInterface({
       <button
         onClick={addNewCodeSnippet}
         className="flex items-center gap-0.5 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted"
-        title="New snippet"
+        title={t.chatInterface.newSnippet}
       >
         <Plus className="h-3 w-3" />
-        New
+        {t.chatInterface.new}
       </button>
       <div className="ml-auto">
         <button
@@ -1153,7 +1156,7 @@ export function ChatInterface({
               ? "text-secondary-600 dark:text-secondary-400"
               : "text-muted-foreground hover:bg-muted"
           }`}
-          title="Save snippet"
+          title={t.chatInterface.saveSnippet}
         >
           {codeSaveStatus === "saving" ? (
             <Loader2 className="h-3 w-3 animate-spin" />
@@ -1162,15 +1165,28 @@ export function ChatInterface({
           ) : (
             <Save className="h-3 w-3" />
           )}
-          {codeSaveStatus === "saved" ? "Saved" : "Save"}
+          {codeSaveStatus === "saved" ? t.chatInterface.saved : t.chatInterface.save}
         </button>
       </div>
     </div>
   );
 
   const previewMessages: Message[] = preview ? [
-    { id: "p-1", role: "ASSISTANT", content: `Hi! I'm ${interview.aiName}. Let's start — ${interview.questions[0]?.text ?? "tell me about yourself."}`, timestamp: "" },
-    { id: "p-2", role: "USER", content: "Sure, I have been working as a software engineer for...", timestamp: "" },
+    {
+      id: "p-1",
+      role: "ASSISTANT",
+      content: t.chatInterface.previewGreeting(
+        interview.aiName,
+        interview.questions[0]?.text ?? t.chatInterface.previewFallbackQuestion,
+      ),
+      timestamp: "",
+    },
+    {
+      id: "p-2",
+      role: "USER",
+      content: t.chatInterface.previewAnswer,
+      timestamp: "",
+    },
   ] : [];
   const displayMessages = (preview ? previewMessages : messages).filter(
     (m) => m.role !== "SYSTEM",
@@ -1207,7 +1223,7 @@ export function ChatInterface({
         )}
       >
         <Clock className="h-3.5 w-3.5" />
-        <span>{formatTime(remainingSeconds)} left</span>
+        <span>{t.chatInterface.timeLeft(formatTime(remainingSeconds))}</span>
       </div>
     ) : null;
 
@@ -1224,11 +1240,11 @@ export function ChatInterface({
               {interview.title}
             </h1>
             <p className="hidden text-xs text-muted-foreground md:block">
-              Chat Interview with {interview.aiName}
+              {t.chatInterface.headerSubtitle(interview.aiName)}
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <IntervieweeHelpPopover mode="chat" />
+            <IntervieweeHelpPopover mode="chat" language={interview.language} />
           </div>
         </div>
         <div
@@ -1254,14 +1270,13 @@ export function ChatInterface({
     <AlertDialog open={finishDialogOpen} onOpenChange={setFinishDialogOpen}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Finish interview?</AlertDialogTitle>
+          <AlertDialogTitle>{t.chatInterface.finishInterviewTitle}</AlertDialogTitle>
           <AlertDialogDescription>
-            Your responses will be saved and submitted. You won&apos;t be able to
-            continue this session afterward.
+            {t.chatInterface.finishInterviewBody}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={finishing}>Keep going</AlertDialogCancel>
+          <AlertDialogCancel disabled={finishing}>{t.chatInterface.keepGoing}</AlertDialogCancel>
           <AlertDialogAction
             disabled={finishing}
             onClick={(event) => {
@@ -1272,10 +1287,10 @@ export function ChatInterface({
             {finishing ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Saving...
+                {t.chatInterface.saving}
               </>
             ) : (
-              "Finish interview"
+              t.chatInterface.finishInterview
             )}
           </AlertDialogAction>
         </AlertDialogFooter>
@@ -1305,7 +1320,7 @@ export function ChatInterface({
           isGenerating={sending || aiTyping}
           disabled={preview}
           submitDisabled={preview || !input.trim()}
-          placeholder="Type your response..."
+          placeholder={t.chatInterface.typeResponse}
           compact={compact}
           textareaRef={inputRef}
           questionNav={composerQuestionNav}
@@ -1391,7 +1406,7 @@ export function ChatInterface({
                 <div className="mb-3 flex items-center gap-2">
                   <FileText className="h-4 w-4 text-muted-foreground" />
                   <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Problem
+                    {t.chatInterface.problem}
                   </span>
                 </div>
                 <h2 className="mb-3 text-base font-semibold leading-snug">{currentQ?.text}</h2>
@@ -1403,7 +1418,7 @@ export function ChatInterface({
                     <div className="flex items-center gap-1.5 border-b border-zinc-800 bg-zinc-900 px-3 py-1.5">
                       <Code2 className="h-3 w-3 text-zinc-400" />
                       <span className="text-[10px] font-medium uppercase tracking-wide text-zinc-400">
-                        Starter Code — {currentQ.starterCode.language}
+                        {t.chatInterface.starterCode} — {currentQ.starterCode.language}
                       </span>
                     </div>
                     <CodeBlock code={currentQ.starterCode.code} language={currentQ.starterCode.language} className="max-h-48" />
@@ -1420,7 +1435,7 @@ export function ChatInterface({
               <div className="relative flex min-h-0 flex-1 flex-col">
                 <div className="flex items-center gap-1.5 border-b bg-card px-3 py-1.5">
                   <MessageCircle className="h-3 w-3 text-muted-foreground" />
-                  <span className="text-xs font-medium text-muted-foreground">Chat</span>
+                  <span className="text-xs font-medium text-muted-foreground">{t.chatInterface.chat}</span>
                 </div>
                 {renderMessages(true)}
                 {renderFloatingComposer(true)}
@@ -1480,7 +1495,7 @@ export function ChatInterface({
                           className="px-2.5 py-1"
                           onClick={() => switchDrawing(i)}
                           onDoubleClick={() => setEditingDrawingId(d.id)}
-                          title="Double-click to rename"
+                          title={t.chatInterface.doubleClickRename}
                         >
                           {d.label}
                         </button>
@@ -1493,7 +1508,7 @@ export function ChatInterface({
                               ? "hover:bg-primary-foreground/20"
                               : "hover:bg-muted-foreground/20"
                           }`}
-                          title="Delete drawing"
+                          title={t.chatInterface.deleteDrawing}
                         >
                           <X className="h-3 w-3" />
                         </button>
@@ -1503,10 +1518,10 @@ export function ChatInterface({
                   <button
                     onClick={addNewDrawing}
                     className="flex items-center gap-0.5 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted"
-                    title="New drawing"
+                    title={t.chatInterface.newDrawing}
                   >
                     <Plus className="h-3 w-3" />
-                    New
+                    {t.chatInterface.new}
                   </button>
                   <div className="ml-auto">
                     <button
@@ -1517,7 +1532,7 @@ export function ChatInterface({
                           ? "text-secondary-600 dark:text-secondary-400"
                           : "text-muted-foreground hover:bg-muted"
                       }`}
-                      title="Save drawing"
+                      title={t.chatInterface.saveDrawing}
                     >
                       {saveStatus === "saving" ? (
                         <Loader2 className="h-3 w-3 animate-spin" />
@@ -1526,7 +1541,7 @@ export function ChatInterface({
                       ) : (
                         <Save className="h-3 w-3" />
                       )}
-                      {saveStatus === "saved" ? "Saved" : "Save"}
+                      {saveStatus === "saved" ? t.chatInterface.saved : t.chatInterface.save}
                     </button>
                   </div>
                 </div>
@@ -1614,7 +1629,7 @@ export function ChatInterface({
                             className="px-2.5 py-1"
                             onClick={() => switchDrawing(i)}
                             onDoubleClick={() => setEditingDrawingId(d.id)}
-                            title="Double-click to rename"
+                            title={t.chatInterface.doubleClickRename}
                           >
                             {d.label}
                           </button>
@@ -1627,7 +1642,7 @@ export function ChatInterface({
                                 ? "hover:bg-primary-foreground/20"
                                 : "hover:bg-muted-foreground/20"
                             }`}
-                            title="Delete drawing"
+                            title={t.chatInterface.deleteDrawing}
                           >
                             <X className="h-3 w-3" />
                           </button>
@@ -1637,10 +1652,10 @@ export function ChatInterface({
                     <button
                       onClick={addNewDrawing}
                       className="flex items-center gap-0.5 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted"
-                      title="New drawing"
+                      title={t.chatInterface.newDrawing}
                     >
                       <Plus className="h-3 w-3" />
-                      New
+                      {t.chatInterface.new}
                     </button>
                     <div className="ml-auto">
                       <button
@@ -1651,7 +1666,7 @@ export function ChatInterface({
                             ? "text-secondary-600 dark:text-secondary-400"
                             : "text-muted-foreground hover:bg-muted"
                         }`}
-                        title="Save drawing"
+                        title={t.chatInterface.saveDrawing}
                       >
                         {saveStatus === "saving" ? (
                           <Loader2 className="h-3 w-3 animate-spin" />
@@ -1660,7 +1675,7 @@ export function ChatInterface({
                         ) : (
                           <Save className="h-3 w-3" />
                         )}
-                        {saveStatus === "saved" ? "Saved" : "Save"}
+                        {saveStatus === "saved" ? t.chatInterface.saved : t.chatInterface.save}
                       </button>
                     </div>
                   </div>

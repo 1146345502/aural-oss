@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { InterviewContext } from "@/hooks/use-voice";
-import { getMicTestMessage, getSpeechSynthesisLocale } from "@/lib/i18n";
+import { useTranslations } from "@/locales";
 import {
     setCameraSkipped,
     setScreenSkipped,
@@ -63,11 +63,7 @@ interface IntervieweeOnboardingProps {
 
 type OnboardingStep = "info" | "checklist" | "howItWorks";
 
-const STEPS = [
-  { key: "info" as const, label: "Interview Info" },
-  { key: "checklist" as const, label: "Checklist" },
-  { key: "enter" as const, label: "Start" },
-];
+const STEP_KEYS = ["info", "checklist", "enter"] as const;
 
 function WelcomeIllustration() {
   return (
@@ -85,11 +81,14 @@ function WelcomeIllustration() {
 
 export function PreviewWrapper({
   onReady,
+  language,
   children,
 }: {
   onReady: () => void;
+  language?: string;
   children: React.ReactNode;
 }) {
+  const t = useTranslations(language);
   const tour = useIntervieweeTour();
   const tourDone = tour?.finished ?? false;
   const [welcomed, setWelcomed] = useState(false);
@@ -115,14 +114,12 @@ export function PreviewWrapper({
           <div className="mx-4 w-full max-w-md overflow-hidden rounded-2xl border border-border/30 bg-white shadow-2xl">
             <WelcomeIllustration />
             <div className="space-y-3 px-8 pb-8 pt-2 text-center">
-              <h3 className="text-xl font-bold text-gray-900">Welcome to your interview!</h3>
+              <h3 className="text-xl font-bold text-gray-900">{t.onboarding.welcome.title}</h3>
               <p className="text-[15px] font-medium text-gray-700">
-                Take a quick tour of the interview interface.
+                {t.onboarding.welcome.subtitle}
               </p>
               <p className="text-sm leading-relaxed text-gray-500">
-                We&apos;ll walk you through the key features — voice controls,
-                transcript, whiteboard, and more — so you know exactly where
-                everything is.
+                {t.onboarding.welcome.body}
               </p>
               <div className="flex items-stretch gap-3 pt-3">
                 <Button
@@ -131,10 +128,10 @@ export function PreviewWrapper({
                   className="text-muted-foreground"
                   onClick={handleSkipTour}
                 >
-                  Skip for now
+                  {t.onboarding.welcome.skipForNow}
                 </Button>
                 <Button className="flex-1" size="lg" onClick={handleStartTour}>
-                  Take a quick tour
+                  {t.onboarding.welcome.takeQuickTour}
                 </Button>
               </div>
             </div>
@@ -147,9 +144,9 @@ export function PreviewWrapper({
         <div className="absolute inset-0 z-[9997] flex items-center justify-center bg-black/40 backdrop-blur-[2px]">
           <div className="mx-4 w-full max-w-md space-y-4 rounded-2xl border bg-card p-6 shadow-2xl">
             <div className="text-center">
-              <h3 className="text-lg font-semibold">You&apos;re all set!</h3>
+              <h3 className="text-lg font-semibold">{t.onboarding.tourComplete.title}</h3>
               <p className="mt-1 text-sm text-muted-foreground">
-                You can start the interview now, or restart the tour if you&apos;d like another look.
+                {t.onboarding.tourComplete.body}
               </p>
             </div>
             <div className="flex items-stretch gap-3">
@@ -160,10 +157,10 @@ export function PreviewWrapper({
                 onClick={() => tour?.restart()}
               >
                 <RotateCcw className="h-3.5 w-3.5" />
-                Restart tour
+                {t.onboarding.tourComplete.restartTour}
               </Button>
               <Button className="flex-1" size="lg" onClick={onReady}>
-                Start Interview
+                {t.onboarding.tourComplete.startInterview}
               </Button>
             </div>
           </div>
@@ -173,18 +170,19 @@ export function PreviewWrapper({
   );
 }
 
-function StepIndicator({ current }: { current: OnboardingStep }) {
+function StepIndicator({ current, language }: { current: OnboardingStep; language?: string }) {
+  const t = useTranslations(language);
   const stepIdxMap: Record<OnboardingStep, number> = { info: 0, checklist: 1, howItWorks: 2 };
-  const currentIdx = Math.min(stepIdxMap[current], STEPS.length - 1);
+  const currentIdx = Math.min(stepIdxMap[current], STEP_KEYS.length - 1);
 
   return (
     <div className="flex items-center justify-center gap-2 py-6">
-      {STEPS.map((step, idx) => {
+      {STEP_KEYS.map((stepKey, idx) => {
         const isComplete = idx < currentIdx;
         const isCurrent = idx === currentIdx;
 
         return (
-          <div key={step.key} className="flex items-center gap-2">
+          <div key={stepKey} className="flex items-center gap-2">
             {idx > 0 && (
               <div
                 className={cn(
@@ -220,7 +218,7 @@ function StepIndicator({ current }: { current: OnboardingStep }) {
                       : "text-muted-foreground"
                 )}
               >
-                {step.label}
+                {t.onboarding.steps[stepKey]}
               </span>
             </div>
           </div>
@@ -233,12 +231,15 @@ function StepIndicator({ current }: { current: OnboardingStep }) {
 function CameraCheck({
   done,
   onDone,
+  language,
   allowSkip = true,
 }: {
   done: boolean;
   onDone: () => void;
+  language?: string;
   allowSkip?: boolean;
 }) {
+  const t = useTranslations(language);
   const [showSkipDialog, setShowSkipDialog] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -263,9 +264,9 @@ function CameraCheck({
       setPhoto(null);
       setStreaming(true);
     } catch {
-      setError("Unable to access camera. Please check permissions.");
+      setError(t.onboarding.camera.accessError);
     }
-  }, []);
+  }, [t]);
 
   const stopCamera = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -325,7 +326,7 @@ function CameraCheck({
               <div className="flex h-full w-full flex-col items-center justify-center gap-2">
                 <User className="h-10 w-10 text-muted-foreground/30" />
                 <span className="text-[11px] text-muted-foreground/50">
-                  Keep your eyes on the camera
+                  {t.onboarding.camera.keepEyesOnCamera}
                 </span>
               </div>
             )}
@@ -333,51 +334,49 @@ function CameraCheck({
           {!photo && !streaming && !done && (
             <Button size="sm" onClick={startCamera} className="w-full">
               <Camera className="mr-1.5 h-3.5 w-3.5" />
-              Start Collecting
+              {t.onboarding.camera.startCollecting}
             </Button>
           )}
           {streaming && (
             <Button size="sm" onClick={capture} className="w-full">
-              Capture
+              {t.onboarding.camera.capture}
             </Button>
           )}
           {photo && (
             <Button size="sm" variant="outline" onClick={retake} className="w-full">
               <RefreshCw className="mr-1 h-3 w-3" />
-              Retake
+              {t.onboarding.camera.retake}
             </Button>
           )}
         </div>
 
         <div className="flex-1 space-y-2">
           <p className="text-sm font-medium">
-            The photo will be compared with snapshots during the interview, so
-            please keep your face visible.
+            {t.onboarding.camera.compareNotice}
           </p>
           <p className="text-xs text-muted-foreground">
-            Photo collection requires authorization, please operate according to
-            browser prompts.
+            {t.onboarding.camera.authNotice}
           </p>
           {error && (
             <div className="flex items-center gap-1.5 rounded-md bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive">
               <AlertCircle className="h-3.5 w-3.5 shrink-0" />
               <span>{error}</span>
               <button type="button" className="ml-auto font-medium underline" onClick={startCamera}>
-                Retry
+                {t.onboarding.common.retry}
               </button>
             </div>
           )}
           {allowSkip && !error && !photo && !streaming && !done && (
             <p className="text-xs text-muted-foreground">
-              No camera?{" "}
+              {t.onboarding.camera.noCamera}{" "}
               <button type="button" className="font-medium text-primary hover:underline" onClick={() => setShowSkipDialog(true)}>
-                Skip
+                {t.onboarding.common.skip}
               </button>
             </p>
           )}
           {!allowSkip && !error && !photo && !streaming && !done && (
             <p className="text-xs text-amber-600 dark:text-amber-400">
-              Camera is required for this interview.
+              {t.onboarding.camera.required}
             </p>
           )}
         </div>
@@ -386,12 +385,12 @@ function CameraCheck({
           {done ? (
             <span className="flex items-center gap-1.5 text-sm font-medium text-secondary-600 dark:text-secondary-400">
               <CheckCircle2 className="h-4 w-4" />
-              Collect photo
+              {t.onboarding.camera.collectPhoto}
             </span>
           ) : (
             <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
               <div className="h-4 w-4 rounded-full border-2" />
-              Collect photo
+              {t.onboarding.camera.collectPhoto}
             </span>
           )}
         </div>
@@ -400,17 +399,15 @@ function CameraCheck({
       <AlertDialog open={showSkipDialog} onOpenChange={setShowSkipDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Skip photo collection?</AlertDialogTitle>
+            <AlertDialogTitle>{t.onboarding.camera.skipTitle}</AlertDialogTitle>
             <AlertDialogDescription>
-              Skipping photo collection is not recommended. The photo is used to
-              verify your identity during the interview. Skipping may affect your
-              interview results.
+              {t.onboarding.camera.skipBody}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Go back</AlertDialogCancel>
+            <AlertDialogCancel>{t.onboarding.common.goBack}</AlertDialogCancel>
             <AlertDialogAction onClick={() => { setCameraSkipped(true); onDone(); }}>
-              Skip anyway
+              {t.onboarding.common.skipAnyway}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -422,6 +419,7 @@ function CameraCheck({
 type MicPhase = "idle" | "requesting" | "playing" | "listening" | "analyzing" | "confirm";
 
 function MicCheck({ done, onDone, language, allowSkip = true }: { done: boolean; onDone: () => void; language?: string; allowSkip?: boolean }) {
+  const t = useTranslations(language);
   const [phase, setPhase] = useState<MicPhase>("idle");
   const [error, setError] = useState<string | null>(null);
   const [showSkipDialog, setShowSkipDialog] = useState(false);
@@ -547,6 +545,9 @@ function MicCheck({ done, onDone, language, allowSkip = true }: { done: boolean;
 
         const ctx = new AudioContext({ sampleRate: 16000 });
         micCtxRef.current = ctx;
+        if (ctx.state === "suspended") {
+          await ctx.resume();
+        }
 
         const workletCode = `
           class MicProcessor extends AudioWorkletProcessor {
@@ -665,7 +666,7 @@ function MicCheck({ done, onDone, language, allowSkip = true }: { done: boolean;
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       stream.getTracks().forEach((t) => t.stop());
     } catch {
-      setError("Unable to access microphone. Please check permissions.");
+      setError(t.onboarding.mic.accessError);
       setPhase("idle");
       return;
     }
@@ -673,7 +674,7 @@ function MicCheck({ done, onDone, language, allowSkip = true }: { done: boolean;
     startListening(true);
     setPhase("playing");
 
-    const msg = getMicTestMessage(language);
+    const msg = t.micTest.greeting;
 
     // Try S2S streaming endpoint first (same voice as interview)
     try {
@@ -682,7 +683,10 @@ function MicCheck({ done, onDone, language, allowSkip = true }: { done: boolean;
 
       const res = await fetch("/api/voice/tts-s2s", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-Aural-TTS-Format": "pcm_f32le",
+        },
         body: JSON.stringify({ text: msg, language: languageRef.current }),
         signal: abort.signal,
       });
@@ -690,6 +694,13 @@ function MicCheck({ done, onDone, language, allowSkip = true }: { done: boolean;
       if (res.ok && res.body) {
         const ctx = new AudioContext({ sampleRate: 24000 });
         audioCtxRef.current = ctx;
+        // This runs after the awaited getUserMedia prompt above, not
+        // synchronously in the click handler — some browsers (notably
+        // Safari) start the context "suspended" in that case, which plays
+        // silence. resume() is a no-op if it's already running.
+        if (ctx.state === "suspended") {
+          await ctx.resume();
+        }
         const reader = res.body.getReader();
         let playTime = ctx.currentTime;
         let leftover: Uint8Array | null = null;
@@ -768,11 +779,11 @@ function MicCheck({ done, onDone, language, allowSkip = true }: { done: boolean;
     }
 
     setPhase("playing");
-    const msg = getMicTestMessage(language);
+    const msg = t.micTest.greeting;
     const utterance = new SpeechSynthesisUtterance(msg);
     utterance.rate = 1;
     utterance.pitch = 1;
-    utterance.lang = getSpeechSynthesisLocale(language);
+    utterance.lang = t.meta.speechSynthesisLocale;
     utterance.onend = () => { if (relayConnectorRef.current?.isReady) { setPhase("listening"); } else { startListening(); } };
     utterance.onerror = () => { if (relayConnectorRef.current?.isReady) { setPhase("listening"); } else { startListening(); } };
     speechSynthesisApi.speak(utterance);
@@ -816,7 +827,7 @@ function MicCheck({ done, onDone, language, allowSkip = true }: { done: boolean;
               <div className="flex flex-col items-center gap-1">
                 <div className="flex gap-1">
                   <div className="h-2 w-2 animate-pulse rounded-full bg-destructive" />
-                  <span className="text-[11px] font-medium text-destructive">Listening...</span>
+                  <span className="text-[11px] font-medium text-destructive">{t.onboarding.mic.listening}</span>
                 </div>
                 {transcript && (
                   <span className="max-w-[10rem] truncate text-[10px] text-muted-foreground">
@@ -826,105 +837,104 @@ function MicCheck({ done, onDone, language, allowSkip = true }: { done: boolean;
               </div>
             )}
             {phase === "analyzing" && (
-              <span className="text-[11px] text-muted-foreground">Analyzing...</span>
+              <span className="text-[11px] text-muted-foreground">{t.onboarding.mic.analyzing}</span>
             )}
             {phase === "idle" && !done && (
               <span className="text-[11px] text-muted-foreground/50">
-                Speaker &amp; Microphone
+                {t.onboarding.mic.speakerMicLabel}
               </span>
             )}
             {done && !skipped && (
               <span className="text-xs font-medium text-secondary-600 dark:text-secondary-400">
-                Audio confirmed
+                {t.onboarding.mic.audioConfirmed}
               </span>
             )}
           </div>
           {phase === "idle" && !done && (
             <Button size="sm" onClick={playTTS} className="w-full">
               <Mic className="mr-1.5 h-3.5 w-3.5" />
-              Test Microphone
+              {t.onboarding.mic.testMicrophone}
             </Button>
           )}
           {phase === "requesting" && (
             <Button size="sm" disabled className="w-full">
               <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-              Requesting access...
+              {t.onboarding.mic.requestingAccess}
             </Button>
           )}
           {phase === "playing" && (
             <Button size="sm" variant="outline" onClick={() => { stopAll(); setPhase("idle"); }} className="w-full">
-              Stop
+              {t.onboarding.mic.stop}
             </Button>
           )}
           {phase === "listening" && (
             <Button size="sm" variant="outline" disabled className="w-full">
               <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-              Listening...
+              {t.onboarding.mic.listening}
             </Button>
           )}
           {phase === "analyzing" && (
             <Button size="sm" disabled className="w-full">
               <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-              Analyzing...
+              {t.onboarding.mic.analyzing}
             </Button>
           )}
           {phase === "confirm" && !done && (
             <Button size="sm" onClick={playTTS} className="w-full">
               <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-              Play again
+              {t.onboarding.mic.playAgain}
             </Button>
           )}
         </div>
 
         <div className="flex-1 space-y-2">
           <p className="text-sm font-medium">
-            Test your speaker and microphone to ensure audio is working
-            properly.
+            {t.onboarding.mic.testInstruction}
           </p>
           <p className="text-xs text-muted-foreground">
             {phase === "idle" && !done &&
-              "Click \"Test Microphone\" to hear a message from the voice agent. Then speak your response to confirm the audio works — just like in the actual interview."}
+              t.onboarding.mic.instructionIdle}
             {phase === "requesting" &&
-              "Granting microphone access..."}
+              t.onboarding.mic.instructionRequesting}
             {phase === "playing" &&
-              "The voice agent is speaking — listen carefully..."}
+              t.onboarding.mic.instructionPlaying}
             {phase === "listening" &&
-              "Please say \"yes\" or \"I can hear you\" to confirm."}
+              t.onboarding.mic.instructionListening}
             {phase === "analyzing" &&
-              "Checking your response..."}
+              t.onboarding.mic.instructionAnalyzing}
             {phase === "confirm" && !done && allowSkip &&
-              "We couldn't detect your voice. Try again, or "}
+              t.onboarding.mic.instructionConfirmRetry}
             {phase === "confirm" && !done && allowSkip && (
               <button type="button" className="font-medium text-primary hover:underline" onClick={() => setShowSkipDialog(true)}>
-                skip this step
+                {t.onboarding.mic.skipThisStep}
               </button>
             )}
             {phase === "confirm" && !done && allowSkip && "."}
             {phase === "confirm" && !done && !allowSkip &&
-              "We couldn't detect your voice. Please try again."}
+              t.onboarding.mic.instructionConfirmNoSkip}
             {done &&
-              "Audio test passed. Your speaker and microphone are working."}
+              t.onboarding.mic.instructionDone}
           </p>
           {error && (
             <div className="flex items-center gap-1.5 rounded-md bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive">
               <AlertCircle className="h-3.5 w-3.5 shrink-0" />
               <span>{error}</span>
               <button type="button" className="ml-auto font-medium underline" onClick={playTTS}>
-                Retry
+                {t.onboarding.common.retry}
               </button>
             </div>
           )}
           {allowSkip && !error && phase === "idle" && !done && (
             <p className="text-xs text-muted-foreground">
-              No microphone?{" "}
+              {t.onboarding.mic.noMic}{" "}
               <button type="button" className="font-medium text-primary hover:underline" onClick={() => setShowSkipDialog(true)}>
-                Skip
+                {t.onboarding.common.skip}
               </button>
             </p>
           )}
           {!allowSkip && !error && phase === "idle" && !done && (
             <p className="text-xs text-amber-600 dark:text-amber-400">
-              Microphone is required for this interview.
+              {t.onboarding.mic.required}
             </p>
           )}
         </div>
@@ -946,17 +956,15 @@ function MicCheck({ done, onDone, language, allowSkip = true }: { done: boolean;
       <AlertDialog open={showSkipDialog} onOpenChange={setShowSkipDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Skip microphone test?</AlertDialogTitle>
+            <AlertDialogTitle>{t.onboarding.mic.skipTitle}</AlertDialogTitle>
             <AlertDialogDescription>
-              Skipping the microphone test is not recommended. If your speaker or
-              microphone is not working properly, it may affect your interview
-              experience and results.
+              {t.onboarding.mic.skipBody}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Go back</AlertDialogCancel>
+            <AlertDialogCancel>{t.onboarding.common.goBack}</AlertDialogCancel>
             <AlertDialogAction onClick={() => { setPhase("idle"); setSkipped(true); onDone(); }}>
-              Skip anyway
+              {t.onboarding.common.skipAnyway}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -968,12 +976,15 @@ function MicCheck({ done, onDone, language, allowSkip = true }: { done: boolean;
 function ScreenCheck({
   done,
   onDone,
+  language,
   allowSkip = true,
 }: {
   done: boolean;
   onDone: () => void;
+  language?: string;
   allowSkip?: boolean;
 }) {
+  const t = useTranslations(language);
   const [error, setError] = useState<string | null>(null);
   const [thumbnail, setThumbnail] = useState<string | null>(null);
   const [showSkipDialog, setShowSkipDialog] = useState(false);
@@ -1007,7 +1018,7 @@ function ScreenCheck({
       if (settings.displaySurface && settings.displaySurface !== "monitor") {
         stream.getTracks().forEach((t) => t.stop());
         setError(
-          "Please share your entire screen, not a window or tab. Click \"Share Screen\" and select \"Entire Screen\"."
+          t.onboarding.screen.shareTooNarrowError
         );
         return;
       }
@@ -1031,9 +1042,9 @@ function ScreenCheck({
       videoEl.srcObject = null;
       onDone();
     } catch {
-      setError("Screen capture was denied or cancelled.");
+      setError(t.onboarding.screen.shareDenied);
     }
-  }, [onDone]);
+  }, [onDone, t]);
 
   if (!isSupported) {
     return (
@@ -1044,17 +1055,16 @@ function ScreenCheck({
               <Monitor className="h-5 w-5 text-muted-foreground" />
             </div>
             <div className="flex-1 space-y-1">
-              <p className="text-sm font-medium">Screen sharing unavailable</p>
+              <p className="text-sm font-medium">{t.onboarding.screen.unavailableTitle}</p>
               <p className="text-xs text-muted-foreground">
-                Screen sharing requires a desktop browser (Chrome recommended).
-                This step has been automatically skipped on your device.
+                {t.onboarding.screen.unavailableBody}
               </p>
             </div>
           </div>
           <div className="flex shrink-0 items-center self-start pt-0.5">
             <span className="flex items-center gap-1.5 text-sm font-medium text-secondary-600 dark:text-secondary-400">
               <CheckCircle2 className="h-4 w-4" />
-              Skipped
+              {t.onboarding.screen.skipped}
             </span>
           </div>
         </CardContent>
@@ -1078,7 +1088,7 @@ function ScreenCheck({
               <div className="flex flex-col items-center gap-2">
                 <ScreenShare className="h-10 w-10 text-muted-foreground/30" />
                 <span className="text-[11px] text-muted-foreground/50">
-                  Entire screen
+                  {t.onboarding.screen.entireScreen}
                 </span>
               </div>
             )}
@@ -1086,42 +1096,42 @@ function ScreenCheck({
           {!done && (
             <Button size="sm" onClick={requestShare} className="w-full">
               <Monitor className="mr-1.5 h-3.5 w-3.5" />
-              Share Screen
+              {t.onboarding.screen.shareScreen}
             </Button>
           )}
         </div>
 
         <div className="flex-1 space-y-2">
           <p className="text-sm font-medium">
-            Screen capture requires authorization.
+            {t.onboarding.screen.authNotice}
           </p>
           <p className="text-xs text-muted-foreground">
-            After clicking &quot;Share Screen&quot;, please select{" "}
+            {t.onboarding.screen.afterClickNotice}{" "}
             <span className="font-medium text-foreground">
-              &quot;Entire Screen&quot;
+              {t.onboarding.screen.entireScreenQuoted}
             </span>{" "}
-            in the pop-up window and click &quot;Share&quot;.
+            {t.onboarding.screen.popupNotice}
           </p>
           {error && (
             <div className="flex items-center gap-1.5 rounded-md bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive">
               <AlertCircle className="h-3.5 w-3.5 shrink-0" />
               <span>{error}</span>
               <button type="button" className="ml-auto font-medium underline" onClick={requestShare}>
-                Retry
+                {t.onboarding.common.retry}
               </button>
             </div>
           )}
           {allowSkip && !error && !done && (
             <p className="text-xs text-muted-foreground">
-              Can&apos;t share screen?{" "}
+              {t.onboarding.screen.cantShare}{" "}
               <button type="button" className="font-medium text-primary hover:underline" onClick={() => setShowSkipDialog(true)}>
-                Skip
+                {t.onboarding.common.skip}
               </button>
             </p>
           )}
           {!allowSkip && !error && !done && (
             <p className="text-xs text-amber-600 dark:text-amber-400">
-              Screen sharing is required for this interview.
+              {t.onboarding.screen.required}
             </p>
           )}
         </div>
@@ -1130,12 +1140,12 @@ function ScreenCheck({
           {done ? (
             <span className="flex items-center gap-1.5 text-sm font-medium text-secondary-600 dark:text-secondary-400">
               <CheckCircle2 className="h-4 w-4" />
-              Screen Capture
+              {t.onboarding.screen.screenCapture}
             </span>
           ) : (
             <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
               <div className="h-4 w-4 rounded-full border-2" />
-              Screen Capture
+              {t.onboarding.screen.screenCapture}
             </span>
           )}
         </div>
@@ -1143,17 +1153,15 @@ function ScreenCheck({
       <AlertDialog open={showSkipDialog} onOpenChange={setShowSkipDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Skip screen sharing?</AlertDialogTitle>
+            <AlertDialogTitle>{t.onboarding.screen.skipTitle}</AlertDialogTitle>
             <AlertDialogDescription>
-              Skipping screen sharing is not recommended. Screen capture is used
-              to monitor your interview environment. Skipping may affect your
-              interview results.
+              {t.onboarding.screen.skipBody}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Go back</AlertDialogCancel>
+            <AlertDialogCancel>{t.onboarding.common.goBack}</AlertDialogCancel>
             <AlertDialogAction onClick={() => { setScreenSkipped(true); onDone(); }}>
-              Skip anyway
+              {t.onboarding.common.skipAnyway}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1175,6 +1183,7 @@ export function IntervieweeOnboarding({
   questionTypes = [],
   onComplete,
 }: IntervieweeOnboardingProps) {
+  const t = useTranslations(language);
   const [step, setStep] = useState<OnboardingStep>("info");
   const [agreed, setAgreed] = useState(false);
 
@@ -1203,7 +1212,7 @@ export function IntervieweeOnboarding({
     return (
       <div className="flex min-h-screen flex-col bg-muted/30">
         {header}
-        <StepIndicator current="info" />
+        <StepIndicator current="info" language={language} />
         <div className="mx-auto w-full max-w-2xl flex-1 px-4 pb-8 sm:px-6">
           <Card>
             <CardContent className="p-4 sm:p-6">
@@ -1211,94 +1220,75 @@ export function IntervieweeOnboarding({
 
               <div className="mt-4 flex gap-6 text-sm">
                 <div>
-                  <span className="font-medium">Description</span>
+                  <span className="font-medium">{t.onboarding.info.description}</span>
                   <p className="mt-1 text-muted-foreground">
-                    {interviewDescription || "No additional description."}
+                    {interviewDescription || t.onboarding.info.noDescription}
                   </p>
                 </div>
               </div>
 
               <div className="mt-2 text-sm text-muted-foreground">
-                {questionCount} questions &middot;{" "}
+                {questionCount} {t.onboarding.info.questions} &middot;{" "}
                 {timeLimitMinutes
-                  ? `${timeLimitMinutes} min`
-                  : "No time limit"}
+                  ? `${timeLimitMinutes} ${t.onboarding.info.min}`
+                  : t.onboarding.info.noTimeLimit}
               </div>
             </CardContent>
           </Card>
 
           <Card className="mt-4">
             <CardContent className="space-y-3 p-4 sm:p-6">
-              <h3 className="font-semibold">Integrity Notices</h3>
+              <h3 className="font-semibold">{t.onboarding.info.integrityTitle}</h3>
               {antiCheatingEnabled ? (
                 <>
                   <div className="rounded-md bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
-                    To ensure fairness, the following integrity measures will be
-                    actively enforced throughout this session.
+                    {t.onboarding.info.antiCheatingIntro}
                   </div>
                   <ol className="list-inside list-decimal space-y-2 text-sm text-muted-foreground">
                     <li>
-                      To ensure that the interview runs properly, please use the
-                      latest version of Chrome.
+                      {t.onboarding.info.chromeNotice}
                     </li>
                     <li>
-                      After completing your answers, please make sure that you have
-                      submitted them to all questions. Otherwise it will affect your
-                      results.
+                      {t.onboarding.info.submitAllNotice}
                     </li>
                     <li>
-                      <span className="font-medium text-foreground">Tab switching and focus tracking:</span>{" "}
-                      Leaving the interview page or switching to another window will
-                      be automatically detected and recorded. If you leave more
-                      than{" "}
-                      <span className="font-medium text-primary">3</span> times,
-                      your session will be flagged for review.
+                      <span className="font-medium text-foreground">{t.onboarding.info.tabSwitchLabel}</span>{" "}
+                      {t.onboarding.info.tabSwitchBody}{" "}
+                      <span className="font-medium text-primary">3</span>{" "}
+                      {t.onboarding.info.tabSwitchLimit}
                     </li>
                     <li>
-                      <span className="font-medium text-foreground">External paste blocked:</span>{" "}
-                      Pasting content from outside the interview page is not
-                      allowed. You can copy and paste freely within the page.
+                      <span className="font-medium text-foreground">{t.onboarding.info.pasteLabel}</span>{" "}
+                      {t.onboarding.info.pasteBody}
                     </li>
                     <li>
-                      <span className="font-medium text-foreground">Multiple screen detection:</span>{" "}
-                      The system will detect if you have multiple monitors connected.
-                      Please unplug or turn off additional screens before starting.
+                      <span className="font-medium text-foreground">{t.onboarding.info.multiScreenLabel}</span>{" "}
+                      {t.onboarding.info.multiScreenBody}
                     </li>
                     <li>
-                      This interview requires a camera to collect your registration
-                      photo and capture your behavior. All photos are privacy
-                      protected.
+                      {t.onboarding.info.cameraNotice}
                     </li>
                     <li>
-                      The interview will screen capture throughout. Screen capture
-                      requires authorization.
+                      {t.onboarding.info.screenCaptureNotice}
                     </li>
                   </ol>
                 </>
               ) : (
                 <ol className="list-inside list-decimal space-y-2 text-sm text-muted-foreground">
                   <li>
-                    To ensure that the interview runs properly, please use the
-                    latest version of Chrome.
+                    {t.onboarding.info.chromeNotice}
                   </li>
                   <li>
-                    After completing your answers, please make sure that you have
-                    submitted them to all questions. Otherwise it will affect your
-                    results.
+                    {t.onboarding.info.submitAllNotice}
                   </li>
                   <li>
-                    Before the interview starts, please shut down any software or
-                    web page with ads, message pop-ups. Please do not leave the
-                    interview page during the whole process.
+                    {t.onboarding.info.noAntiCheatingNotice}
                   </li>
                   <li>
-                    This interview requires a camera to collect your registration
-                    photo and capture your behavior. All photos are privacy
-                    protected.
+                    {t.onboarding.info.cameraNotice}
                   </li>
                   <li>
-                    The interview will screen capture throughout. Screen capture
-                    requires authorization.
+                    {t.onboarding.info.screenCaptureNotice}
                   </li>
                 </ol>
               )}
@@ -1311,14 +1301,14 @@ export function IntervieweeOnboarding({
                 checked={agreed}
                 onCheckedChange={(v) => setAgreed(v === true)}
               />
-              I agree to the above notice and interview guidelines
+              {t.onboarding.info.agree}
             </label>
             <Button
               disabled={!agreed}
               onClick={() => setStep("checklist")}
               className="w-40"
             >
-              Next
+              {t.onboarding.common.next}
             </Button>
           </div>
         </div>
@@ -1327,7 +1317,7 @@ export function IntervieweeOnboarding({
   }
 
   if (starting) {
-    return <PreparingScreen />;
+    return <PreparingScreen language={language} />;
   }
 
   if (step === "howItWorks") {
@@ -1351,7 +1341,7 @@ export function IntervieweeOnboarding({
 
     return (
       <IntervieweeTourProvider mode="voice">
-        <PreviewWrapper onReady={handleComplete}>
+        <PreviewWrapper onReady={handleComplete} language={language}>
           <VoiceInterface
             sessionId="__preview__"
             interviewId="__preview__"
@@ -1365,7 +1355,7 @@ export function IntervieweeOnboarding({
             preview
           />
         </PreviewWrapper>
-        <IntervieweeTourOverlay />
+        <IntervieweeTourOverlay language={language} />
       </IntervieweeTourProvider>
     );
   }
@@ -1373,15 +1363,15 @@ export function IntervieweeOnboarding({
   return (
     <div className="flex min-h-screen flex-col bg-muted/30">
       {header}
-      <StepIndicator current="checklist" />
+      <StepIndicator current="checklist" language={language} />
       <div className="mx-auto w-full max-w-2xl flex-1 space-y-4 px-4 pb-8">
-        <CameraCheck done={cameraDone} onDone={() => setCameraDone(true)} allowSkip={!antiCheatingEnabled} />
+        <CameraCheck done={cameraDone} onDone={() => setCameraDone(true)} language={language} allowSkip={!antiCheatingEnabled} />
         <MicCheck done={micDone} onDone={() => setMicDone(true)} language={language} allowSkip={!antiCheatingEnabled} />
-        <ScreenCheck done={screenDone} onDone={() => setScreenDone(true)} allowSkip={!antiCheatingEnabled} />
+        <ScreenCheck done={screenDone} onDone={() => setScreenDone(true)} language={language} allowSkip={!antiCheatingEnabled} />
 
         <div className="flex items-center justify-center gap-3 pt-4">
           <Button variant="outline" onClick={() => setStep("info")}>
-            Back
+            {t.onboarding.common.back}
           </Button>
           <Button
             disabled={!allChecksDone}
@@ -1390,11 +1380,11 @@ export function IntervieweeOnboarding({
               else onComplete();
             }}
           >
-            Next
+            {t.onboarding.common.next}
           </Button>
         </div>
         <p className="text-center text-xs text-muted-foreground">
-          Chrome is recommended for a better experience.
+          {t.onboarding.info.chromeRecommended}
         </p>
       </div>
     </div>

@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
+import { useTranslations } from "@/locales";
 import { trpc } from "@/lib/trpc/client";
 import { Link2Off, Loader2, Lock, MessageSquare, Mic, Plus, RotateCcw } from "lucide-react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
@@ -61,6 +62,7 @@ export default function PublicInterviewPage() {
   const canResume = !!storedSessionId && existingSession.data?.status === "IN_PROGRESS";
 
   const interview = trpc.interview.getBySlug.useQuery({ slug }, { retry: false });
+  const t = useTranslations(interview.data?.language);
 
   const createSession = trpc.session.create.useMutation({
     onSuccess: (data) => {
@@ -69,7 +71,7 @@ export default function PublicInterviewPage() {
     },
     onError: (err) => {
       toast({
-        title: "Failed to start interview",
+        title: t.interviewLanding.failedToStart,
         description: err.message,
         variant: "destructive",
       });
@@ -124,11 +126,11 @@ export default function PublicInterviewPage() {
 
   if (completed) {
     try { localStorage.removeItem(STORAGE_PREFIX + slug); } catch { /* noop */ }
-    return <SessionEndedScreen />;
+    return <SessionEndedScreen language={interview.data.language} />;
   }
 
   if (storedSessionId && existingSession.isLoading) {
-    return <PreparingScreen />;
+    return <PreparingScreen language={interview.data.language} />;
   }
 
   return (
@@ -148,10 +150,9 @@ export default function PublicInterviewPage() {
           {interview.data.requireInvite && !isPreview && !canResume && (
             <div className="py-6 text-center">
               <Lock className="mx-auto h-10 w-10 text-muted-foreground/50" />
-              <p className="mt-3 font-medium">Invite only</p>
+              <p className="mt-3 font-medium">{t.interviewLanding.inviteOnly}</p>
               <p className="mt-1 text-sm text-muted-foreground">
-                This interview is accessible only through a personal invite link.
-                Please check your email for the link from the interviewer.
+                {t.interviewLanding.inviteOnlyBody}
               </p>
             </div>
           )}
@@ -161,19 +162,19 @@ export default function PublicInterviewPage() {
             <div className="mb-6 space-y-3">
               <div className="rounded-lg border border-primary/30 bg-primary/5 p-4">
                 <p className="text-sm font-medium">
-                  You have an unfinished interview session.
+                  {t.interviewLanding.unfinishedSession}
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Pick up right where you left off, or start fresh.
+                  {t.interviewLanding.pickUpWhereLeftOff}
                 </p>
                 <div className="mt-3 flex gap-2">
                   <Button className="flex-1" onClick={handleResume}>
                     <RotateCcw className="mr-2 h-4 w-4" />
-                    Continue Interview
+                    {t.interviewLanding.continueInterview}
                   </Button>
                   <Button variant="outline" className="flex-1" onClick={handleStartNew}>
                     <Plus className="mr-2 h-4 w-4" />
-                    Start New
+                    {t.interviewLanding.startNew}
                   </Button>
                 </div>
               </div>
@@ -195,37 +196,37 @@ export default function PublicInterviewPage() {
             >
               <div className="space-y-2">
                 <Label htmlFor="name">
-                  Your Name <span className="text-destructive">*</span>
+                  {t.interviewLanding.yourName} <span className="text-destructive">*</span>
                 </Label>
                 <Input
                   id="name"
                   value={participantName}
                   onChange={(e) => setParticipantName(e.target.value)}
-                  placeholder="Enter your name"
+                  placeholder={t.interviewLanding.enterYourName}
                   required
                 />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="email">
-                  Your Email <span className="text-destructive">*</span>
+                  {t.interviewLanding.yourEmail} <span className="text-destructive">*</span>
                 </Label>
                 <Input
                   id="email"
                   type="email"
                   value={participantEmail}
                   onChange={(e) => setParticipantEmail(e.target.value)}
-                  placeholder="Enter your email"
+                  placeholder={t.interviewLanding.enterYourEmail}
                   required
                 />
               </div>
 
               <div className="rounded-lg bg-muted p-4 text-sm text-muted-foreground">
                 <p>
-                  {interview.data.questions.length} questions &middot;{" "}
+                  {interview.data.questions.length} {t.interviewLanding.questions} &middot;{" "}
                   {interview.data.timeLimitMinutes
-                    ? `${interview.data.timeLimitMinutes} min`
-                    : "No time limit"}
-                  
+                    ? `${interview.data.timeLimitMinutes} ${t.interviewLanding.min}`
+                    : t.interviewLanding.noTimeLimit}
+
                 </p>
               </div>
 
@@ -235,14 +236,14 @@ export default function PublicInterviewPage() {
                     <Mic className="h-4 w-4 text-primary" />
                     <span>
                       {interview.data.chatEnabled
-                        ? "This interview supports voice and text chat"
-                        : "This interview uses voice mode (requires Chrome or Edge)"}
+                        ? t.interviewLanding.voiceAndChat
+                        : t.interviewLanding.voiceOnly}
                     </span>
                   </>
                 ) : (
                   <>
                     <MessageSquare className="h-4 w-4 text-primary" />
-                    <span>This interview uses text chat</span>
+                    <span>{t.interviewLanding.textChatOnly}</span>
                   </>
                 )}
               </div>
@@ -259,7 +260,7 @@ export default function PublicInterviewPage() {
                 {createSession.isLoading && (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 )}
-                Begin Interview
+                {t.interviewLanding.beginInterview}
               </Button>
             </form>
           )}
