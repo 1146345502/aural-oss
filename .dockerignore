@@ -1,0 +1,19 @@
+node_modules
+.next
+.git
+.github
+
+# Env files (never bake secrets into an image layer)
+.env
+.env.local
+.env.*.local
+
+# Tests, docs, editor/OS cruft
+tests
+playwright-report
+test-results
+*.md
+.vscode
+.idea
+.DS_Store
+npm-debug.log*

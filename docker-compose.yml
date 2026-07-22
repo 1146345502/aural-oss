@@ -1,0 +1,59 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runner
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+        NEXT_PUBLIC_VOICE_RELAY_URL: ${NEXT_PUBLIC_VOICE_RELAY_URL}
+        NEXT_PUBLIC_OPENAI_VOICE_RELAY_URL: ${NEXT_PUBLIC_OPENAI_VOICE_RELAY_URL}
+        NEXT_PUBLIC_VOICE_RELAY_PRIMARY: ${NEXT_PUBLIC_VOICE_RELAY_PRIMARY}
+    env_file: .env
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    restart: unless-stopped
+
+  # Single public entrypoint: proxies / to web, and /ws/voice + /ws/openai-voice
+  # to the relay containers, all under one origin (see PUBLIC_ORIGIN in .env /
+  # scripts/set-public-origin.sh). This is what a tunnel or real domain should
+  # actually point at, instead of the app's port directly.
+  nginx:
+    image: nginx:alpine
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "80:80"
+    depends_on:
+      - web
+    restart: unless-stopped
+
+  # Volcengine Doubao voice relay (primary). Opt-in: only starts with
+  # `docker compose --profile voice up`, since it requires DOUBAO_* credentials.
+  voice-relay:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: relay
+    command: ["npx", "tsx", "server/voice-relay.ts"]
+    env_file: .env
+    ports:
+      - "8766:8766"
+    profiles: ["voice"]
+    restart: unless-stopped
+
+  # Azure OpenAI Realtime voice relay (backup). Also opt-in via the
+  # "voice" profile; requires AZURE_OPENAI_* credentials.
+  openai-voice-relay:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: relay
+    command: ["npx", "tsx", "server/openai-voice-relay.ts"]
+    env_file: .env
+    ports:
+      - "8767:8767"
+    profiles: ["voice"]
+    restart: unless-stopped
