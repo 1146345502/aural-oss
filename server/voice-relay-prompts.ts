@@ -6,17 +6,48 @@
  * extend BiText in src/lib/i18n.ts and add translations to
  * each template below.
  */
-import {
-    AI_TONE_ZH,
-    AI_TONE_ZH_DEFAULT,
-    type BiText,
-    bt,
-    INTERVIEW_MESSAGES,
-    QUESTION_TYPE_HINT,
-    QUESTION_TYPE_LABEL,
-    ROLE_LABELS,
-    SCREEN_PROMPT,
-} from "../src/lib/i18n";
+import { type BiText, bt } from "../src/lib/i18n";
+import { getDictionary } from "../src/locales";
+
+const zhDict = getDictionary("zh");
+const enDict = getDictionary("en");
+
+function toBiText(key: (d: ReturnType<typeof getDictionary>) => string): BiText {
+  return { zh: key(zhDict), en: key(enDict) };
+}
+
+const AI_TONE_ZH: Record<string, string> = zhDict.relay.aiTone;
+const AI_TONE_ZH_DEFAULT = zhDict.relay.aiTone.default;
+
+const ROLE_LABELS = {
+  participant: toBiText((d) => d.relay.roleLabels.participant),
+  interviewer: toBiText((d) => d.relay.roleLabels.interviewer),
+};
+
+const QUESTION_TYPE_LABEL: Record<string, BiText> = {
+  CODING: toBiText((d) => d.relay.questionTypeLabel.CODING),
+  WHITEBOARD: toBiText((d) => d.relay.questionTypeLabel.WHITEBOARD),
+};
+
+const QUESTION_TYPE_HINT: Record<string, Record<string, BiText>> = {
+  CODING: {
+    start: toBiText((d) => d.relay.questionTypeHint.CODING.start),
+    continue: toBiText((d) => d.relay.questionTypeHint.CODING.continue),
+  },
+  WHITEBOARD: {
+    start: toBiText((d) => d.relay.questionTypeHint.WHITEBOARD.start),
+    continue: toBiText((d) => d.relay.questionTypeHint.WHITEBOARD.continue),
+  },
+};
+
+const SCREEN_PROMPT: BiText = toBiText((d) => d.relay.screenPrompt);
+
+const INTERVIEW_MESSAGES = {
+  defaultQuestion: toBiText((d) => d.relay.messages.defaultQuestion),
+  wrapUp: toBiText((d) => d.relay.messages.wrapUp),
+  farewell: toBiText((d) => d.relay.messages.farewell),
+  summaryError: toBiText((d) => d.relay.messages.summaryError),
+};
 
 // ── Types ───────────────────────────────────────────────────────────
 

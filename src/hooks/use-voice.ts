@@ -417,6 +417,13 @@ export function useVoice({
       if (!audioContextRef.current) {
         audioContextRef.current = new AudioContext({ sampleRate: 24000 });
       }
+      // Browsers (notably Safari) can create the context in "suspended"
+      // state when this runs after an awaited getUserMedia prompt rather
+      // than synchronously inside the originating click handler — resume()
+      // is a no-op if it's already running.
+      if (audioContextRef.current.state === "suspended") {
+        await audioContextRef.current.resume();
+      }
 
       // Reset tracked messages
       trackedMessagesRef.current = [];
@@ -655,7 +662,13 @@ export function useVoice({
           const text = extractText(msg.data);
           if (text) {
             clearAsrProcessingTimer();
-            chatBufferRef.current += (chatBufferRef.current ? " " : "") + text;
+            // Plain concatenation, matching the server-side buffer assembly
+            // (server/openai-voice-relay.ts's outputTranscriptBuffer): each
+            // delta chunk already carries its own correct internal spacing.
+            // Forcing a space before every chunk broke mid-word streaming
+            // deltas from the OpenAI relay (e.g. "Évaluateur" arriving as
+            // "É" + "valu" + "ateur") into garbled, incorrectly spaced text.
+            chatBufferRef.current += text;
             setState((s) => ({
               ...s,
               aiTranscript: chatBufferRef.current,
@@ -841,6 +854,9 @@ export function useVoice({
       mediaStreamRef.current = stream;
 
       const ctx = new AudioContext({ sampleRate: 16000 });
+      if (ctx.state === "suspended") {
+        await ctx.resume();
+      }
       const source = ctx.createMediaStreamSource(stream);
       const processor = ctx.createScriptProcessor(4096, 1, 1);
 

@@ -20,6 +20,42 @@ const TTS_VOICE_ZH = process.env.DOUBAO_VOICE_ZH || "";
 const TTS_VOICE_EN = process.env.DOUBAO_VOICE_EN || "";
 const TTS_SPEECH_RATE = resolveTtsSpeechRate();
 
+// Fallback TTS when Doubao isn't configured. Uses the same key/voice as the
+// OpenAI realtime relay; the model is multilingual, so it speaks whatever
+// language `text` is written in without needing a per-language voice id.
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
+const OPENAI_TTS_MODEL = process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts";
+const OPENAI_TTS_VOICE =
+  process.env.OPENAI_REALTIME_VOICE || process.env.AZURE_OPENAI_VOICE || "ash";
+
+async function synthesizeWithOpenAi(
+  text: string,
+  signal: AbortSignal,
+  responseFormat: "wav" | "mp3" | "pcm"
+): Promise<Uint8Array> {
+  const res = await fetch("https://api.openai.com/v1/audio/speech", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: OPENAI_TTS_MODEL,
+      voice: OPENAI_TTS_VOICE,
+      input: text,
+      response_format: responseFormat,
+    }),
+    signal,
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(`OpenAI TTS failed (${res.status}): ${errText.slice(0, 300)}`);
+  }
+
+  return new Uint8Array(await res.arrayBuffer());
+}
+
 type TtsClientFormat = "wav" | "mp3" | "pcm_f32le";
 
 function resolveClientFormat(req: Request): TtsClientFormat {
@@ -144,21 +180,60 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Missing text" }, { status: 400 });
   }
 
-  if (
-    !isTtsAuthConfigured({
-      appId: TTS_APP_ID,
-      accessToken: TTS_ACCESS_TOKEN,
-      apiKey: TTS_API_KEY,
-    })
-  ) {
+  const doubaoConfigured = isTtsAuthConfigured({
+    appId: TTS_APP_ID,
+    accessToken: TTS_ACCESS_TOKEN,
+    apiKey: TTS_API_KEY,
+  });
+
+  if (!doubaoConfigured && !OPENAI_API_KEY) {
     return NextResponse.json(
-      { error: "Doubao TTS credentials not configured" },
+      { error: "No TTS credentials configured (Doubao or OpenAI)" },
       { status: 503 }
     );
   }
 
   const abort = new AbortController();
   req.signal.addEventListener("abort", () => abort.abort(), { once: true });
+
+  if (!doubaoConfigured) {
+    try {
+      const clientFormat = resolveClientFormat(req);
+      // OpenAI's API doesn't have a "pcm_f32le" format; request raw s16le PCM
+      // ("pcm") and convert, mirroring the Doubao path below. For wav/mp3
+      // requests, OpenAI can produce those containers directly.
+      const openAiFormat = clientFormat === "pcm_f32le" ? "pcm" : clientFormat;
+      const raw = await synthesizeWithOpenAi(rawText, abort.signal, openAiFormat);
+      const responseBody = clientFormat === "pcm_f32le"
+        ? s16leToF32le(Buffer.from(raw))
+        : raw;
+      const contentType = clientFormat === "mp3"
+        ? "audio/mpeg"
+        : clientFormat === "pcm_f32le"
+          ? "application/octet-stream"
+          : "audio/wav";
+      log.info(`OpenAI TTS synthesized ${clientFormat}: ${responseBody.byteLength}B`);
+      return new Response(toArrayBuffer(responseBody), {
+        status: 200,
+        headers: {
+          "Content-Type": contentType,
+          "Cache-Control": "no-store",
+          "X-Aural-TTS-Format": clientFormat,
+          "X-Aural-TTS-Provider": OPENAI_TTS_MODEL,
+        },
+      });
+    } catch (err) {
+      if (abort.signal.aborted || isAbortError(err)) {
+        return new Response(null, { status: 499 });
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      log.error("OpenAI TTS synthesis failed:", message);
+      return NextResponse.json(
+        { error: "OpenAI TTS synthesis failed" },
+        { status: 502 }
+      );
+    }
+  }
 
   try {
     const clientFormat = resolveClientFormat(req);

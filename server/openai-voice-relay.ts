@@ -1,7 +1,11 @@
 /**
- * Backup voice relay using Azure OpenAI Realtime API (gpt-realtime-1.5).
+ * Backup voice relay using OpenAI's Realtime API — either Azure OpenAI
+ * (AZURE_OPENAI_ENDPOINT + AZURE_OPENAI_API_KEY) or plain api.openai.com
+ * (OPENAI_API_KEY). Azure is used when configured; otherwise falls back to
+ * plain OpenAI. Both speak the same v1 realtime wire protocol, so only the
+ * connection URL/auth/model id differ — see USE_AZURE below.
  *
- * Browser ←→ this relay ←→ Azure OpenAI Realtime API
+ * Browser ←→ this relay ←→ OpenAI Realtime API (Azure or api.openai.com)
  *
  * Primary relay: server/voice-relay.ts (Volcengine S2S).
  * Run this as an alternative:  npm run dev:openai-voice
@@ -10,6 +14,7 @@
 import { randomUUID } from "crypto";
 import { config } from "dotenv";
 import { WebSocket, WebSocketServer } from "ws";
+import { getDictionary, getLanguageKey } from "../src/locales";
 import { createLogger } from "../src/lib/logger";
 import {
     DEFAULT_TTS_BARGE_IN_MIN_AUDIO_BYTES,
@@ -38,14 +43,40 @@ const RELAY_PORT =
 const AZURE_ENDPOINT = process.env.AZURE_OPENAI_ENDPOINT || "";
 const AZURE_API_KEY = process.env.AZURE_OPENAI_API_KEY || "";
 const AZURE_DEPLOYMENT = process.env.AZURE_OPENAI_DEPLOYMENT || "gpt-realtime-1.5";
-const AZURE_VOICE = (process.env.AZURE_OPENAI_VOICE || "ash").toLowerCase();
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
+const OPENAI_REALTIME_MODEL = process.env.OPENAI_REALTIME_MODEL || "gpt-realtime-2.1";
+const REALTIME_VOICE = (
+  process.env.AZURE_OPENAI_VOICE || process.env.OPENAI_REALTIME_VOICE || "ash"
+).toLowerCase();
+// "marin" is OpenAI's newer, brighter female-sounding Realtime voice — used
+// for French interviews so the agent reads as a French woman rather than
+// the default voice. Overridable per deployment.
+const REALTIME_VOICE_FR = (process.env.OPENAI_REALTIME_VOICE_FR || "marin").toLowerCase();
+
+function resolveRealtimeVoice(language?: string): string {
+  return getLanguageKey(language) === "fr" ? REALTIME_VOICE_FR : REALTIME_VOICE;
+}
 const OPENAI_REALTIME_TRANSCRIPTION_MODEL =
   process.env.OPENAI_REALTIME_TRANSCRIPTION_MODEL || "whisper-1";
 
-const OPENAI_WS_URL = `${AZURE_ENDPOINT}/openai/v1/realtime?model=${AZURE_DEPLOYMENT}`;
+// Prefer Azure OpenAI when configured (original behavior). Fall back to the
+// plain api.openai.com Realtime API when only OPENAI_API_KEY is set — same
+// wire protocol (both speak /v1/realtime?model=...), different host/auth/model id.
+const USE_AZURE = !!(AZURE_ENDPOINT && AZURE_API_KEY);
 
-if (!AZURE_ENDPOINT || !AZURE_API_KEY) {
-  log.error("Missing AZURE_OPENAI_ENDPOINT or AZURE_OPENAI_API_KEY in .env.local");
+const OPENAI_WS_URL = USE_AZURE
+  ? `${AZURE_ENDPOINT}/openai/v1/realtime?model=${AZURE_DEPLOYMENT}`
+  : `wss://api.openai.com/v1/realtime?model=${OPENAI_REALTIME_MODEL}`;
+
+const REALTIME_AUTH_HEADERS: Record<string, string> = USE_AZURE
+  ? { "api-key": AZURE_API_KEY }
+  : { Authorization: `Bearer ${OPENAI_API_KEY}` };
+
+if (!USE_AZURE && !OPENAI_API_KEY) {
+  log.error(
+    "Missing credentials: set AZURE_OPENAI_ENDPOINT + AZURE_OPENAI_API_KEY " +
+    "(Azure), or OPENAI_API_KEY (plain OpenAI), in .env.local"
+  );
   process.exit(1);
 }
 
@@ -247,6 +278,7 @@ function resample16to24(input: Buffer): Buffer {
 
 function buildSystemPrompt(ctx: InterviewContext, startIdx: number): string {
   const isZh = isChineseInterview(ctx);
+  const isFr = getLanguageKey(ctx.language) === "fr";
   const sorted = ctx.questions.sort((a, b) => a.order - b.order);
 
   let maxFollowUps: number;
@@ -323,6 +355,59 @@ ${questionList}
 - 始终关注当前问题，不要跳到其他话题。
 - 对于选择题，确保受访者给出选择并解释理由。
 - 当受访者让你看白板时，描述你看到的内容并给出反馈。不要在收到图片更新时自动开口说话。`;
+  }
+
+  if (isFr) {
+    return `Tu es "${ctx.aiName}", un(e) intervieweur(se) IA ${ctx.aiTone}.
+
+## Détails de l'entretien
+- Sujet : "${ctx.title}"
+${ctx.objective ? `- Objectif : ${ctx.objective}` : ""}
+- Nombre total de questions : ${sorted.length}
+- Question de départ : Question ${currentQ}
+- Profondeur des relances : jusqu'à ${maxFollowUps} relances par question
+
+## Questions
+${questionList}
+
+## Ton comportement
+1. Commence à la question ${currentQ}. D'abord, fais un accueil chaleureux — présente-toi par ton nom, mentionne le sujet "${ctx.title}" et le nombre de questions (${sorted.length}). Dis ensuite une phrase de transition comme « Commençons. Voici la première question. » C'EST SEULEMENT APRÈS que tu poses la question. L'accueil, la phrase de transition et la question DOIVENT être trois phrases distinctes — ne les combine JAMAIS en une seule.
+2. Pour chaque question, relance en fonction des réponses du participant (jusqu'à ${maxFollowUps} relances). Adopte le ton d'un intervieweur humain chaleureux et patient, pas celui d'un questionnaire mitraillé.
+3. Lorsqu'une question a été suffisamment discutée, appelle la fonction signal_question_change pour passer à la suivante. « Suffisamment discutée » signifie que le participant a donné une réponse détaillée et précise — PAS une remarque vague comme « j'ai eu beaucoup de défis » ou « bonne question ». Si la réponse est vague, demande-lui de préciser avant de continuer.
+4. Après la transition, introduis naturellement la question suivante. Commence généralement par un bref remerciement ou une reconnaissance de la dernière réponse du participant avant de poser la question suivante.
+5. Une fois toutes les questions terminées, appelle signal_question_change avec questionIndex=${sorted.length} (hors limites), puis fais une brève conclusion et un mot d'adieu.
+6. Garde des réponses concises (1 à 3 phrases) et conversationnelles. Parle à un rythme calme et posé — légèrement plus lent qu'une conversation normale afin que le participant puisse suivre facilement. Utilise de courtes transitions amicales comme « Merci pour ce partage », « Je comprends le contexte » ou « Cela a du sens » lorsque c'est approprié.
+7. Si le participant demande à « passer » ou à la « question suivante », acquiesce brièvement puis appelle immédiatement signal_question_change avec userRequested=true.
+8. Si le participant demande la « question précédente », appelle signal_question_change avec l'index de la question précédente et userRequested=true.
+
+## Règles spéciales pour les questions à choix
+Lorsque tu poses une question à CHOIX UNIQUE ou à CHOIX MULTIPLES, tu DOIS énoncer TOUTES les options de réponse (A, B, C, etc.) en posant la question. Le participant ne peut que t'entendre — il ne peut pas voir les options si tu ne les dis pas. Après avoir énuméré les options, demande au participant de choisir et d'expliquer son raisonnement. Pour les questions à choix multiples, rappelle-lui qu'il peut sélectionner plusieurs options.
+
+## Règles spéciales pour les questions de programmation / tableau blanc
+Lors de la transition vers une question de type CODING ou WHITEBOARD :
+- Ne lis PAS l'énoncé complet de la question ! Les détails sont déjà affichés à l'écran du participant. Indique simplement brièvement qu'il s'agit d'une question de programmation/tableau blanc et demande-lui de lire l'énoncé à l'écran et d'utiliser l'éditeur de code/le tableau blanc.
+- Garde des réponses courtes — laisse le participant se concentrer sur la réflexion et le codage/dessin.
+- Catégorise les propos du participant et réponds en conséquence :
+  1. Il TE PARLE (pose des questions, discute de son approche) → Réponds naturellement
+  2. Il dit qu'il a TERMINÉ (« j'ai fini », « c'est terminé ») → Demande-lui son approche, la complexité en temps/espace et les améliorations possibles
+  3. Il RÉFLÉCHIT À VOIX HAUTE (monologue, « hmm », lecture du code) → Un bref encouragement seulement (ex. « Prends ton temps »)
+  4. Il souhaite PASSER (« je n'y arrive pas », « passer », « question suivante ») → Bref encouragement, puis appelle signal_question_change
+  5. La discussion s'est naturellement CONCLUE → Bref remerciement, puis appelle signal_question_change
+
+## Exigences linguistiques
+- TU DOIS TOUJOURS RÉPONDRE EN FRANÇAIS. Tu dois mener cet entretien entièrement en français. Ne change de langue en aucune circonstance.
+
+## Visibilité du code et du tableau blanc
+- Tu PEUX voir le code et le tableau blanc du participant ! Le système t'envoie des mises à jour en temps réel via les messages [CODE_UPDATE] et [WHITEBOARD_UPDATE] contenant le code de son éditeur et les images du tableau blanc.
+- Quand le participant demande « peux-tu voir mon code ? » ou « regarde ce que j'ai écrit », réponds OUI et fais référence au dernier code/contenu du tableau blanc reçu.
+- Ne parle PAS spontanément lorsque tu reçois une mise à jour — mentionne le contenu uniquement lorsque le participant s'adresse à toi.
+
+## Règles importantes
+- Tu DOIS utiliser la fonction signal_question_change pour passer d'une question à l'autre. Ne dis JAMAIS verbalement « passons à la suite » sans aussi appeler la fonction — l'interface ne se met à jour que lorsque la fonction est appelée.
+- N'appelle PAS signal_question_change si le participant s'est contenté d'une brève salutation, d'une remarque de clarification ou d'une déclaration vague (ex. « salut », « tu m'entends ? », « j'ai eu beaucoup de défis »). Réponds d'abord chaleureusement et utilement, puis continue la question en cours. Ce ne sont PAS des réponses substantielles. Tu DOIS attendre une réponse détaillée et précise qui traite réellement de la question avant de continuer. Si la réponse est trop brève ou vague, approfondis.
+- Reste concentré sur la question en cours. Ne saute pas vers des sujets sans rapport.
+- Pour les questions à choix, assure-toi que le participant sélectionne bien une option ET explique son raisonnement.
+- Quand le participant te demande de regarder le tableau blanc, décris ce que tu vois et donne un retour. Ne commence PAS à parler automatiquement lorsque tu reçois une mise à jour d'image du tableau blanc — attends que le participant s'adresse à toi.`;
   }
 
   return `You are "${ctx.aiName}", a ${ctx.aiTone} AI interviewer.
@@ -403,7 +488,11 @@ const OPENAI_TOOLS = [{
 
 const wss = new WebSocketServer({ port: RELAY_PORT });
 log.info(`OpenAI voice relay listening on ws://localhost:${RELAY_PORT}`);
-log.info(`Deployment: ${AZURE_DEPLOYMENT}, Voice: ${AZURE_VOICE}`);
+log.info(
+  USE_AZURE
+    ? `Azure deployment: ${AZURE_DEPLOYMENT}, Voice: ${REALTIME_VOICE} (fr: ${REALTIME_VOICE_FR})`
+    : `OpenAI model: ${OPENAI_REALTIME_MODEL}, Voice: ${REALTIME_VOICE} (fr: ${REALTIME_VOICE_FR})`
+);
 log.info(
   `ASR: ${USE_VOLC_ASR_PRIMARY ? "Volcengine primary" : "OpenAI primary"}`
   + ` (OpenAI transcription model: ${OPENAI_REALTIME_TRANSCRIPTION_MODEL}; `
@@ -426,7 +515,7 @@ wss.on("connection", (browserWs) => {
       if (msg.type === "mic_test") {
         clearTimeout(timeout);
         browserWs.removeListener("message", handler);
-        handleMicTest(browserWs);
+        handleMicTest(browserWs, typeof msg.language === "string" ? msg.language : undefined);
       } else if (msg.type === "init" && msg.context) {
         clearTimeout(timeout);
         browserWs.removeListener("message", handler);
@@ -439,8 +528,12 @@ wss.on("connection", (browserWs) => {
 
 // ── Mic test handler ────────────────────────────────────────────────
 
-async function handleMicTest(browserWs: WebSocket) {
-  log.info(`Mic test mode (${USE_VOLC_ASR_PRIMARY ? "Volcengine" : "OpenAI"})`);
+function buildMicTestInstructions(language?: string): string {
+  return getDictionary(language).relay.micTestInstructions;
+}
+
+async function handleMicTest(browserWs: WebSocket, language?: string) {
+  log.info(`Mic test mode (${USE_VOLC_ASR_PRIMARY ? "Volcengine" : "OpenAI"}, language=${language || "en"})`);
 
   let oaiWs: WebSocket | null = null;
   let volcWs: WebSocket | null = null;
@@ -550,7 +643,7 @@ async function handleMicTest(browserWs: WebSocket) {
   async function connectMicTestOpenAI() {
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        oaiWs = new WebSocket(OPENAI_WS_URL, { headers: { "api-key": AZURE_API_KEY } });
+        oaiWs = new WebSocket(OPENAI_WS_URL, { headers: REALTIME_AUTH_HEADERS });
         await new Promise<void>((resolve, reject) => {
           const t = setTimeout(() => reject(new Error("OpenAI connect timeout")), 10_000);
           oaiWs!.on("open", () => { clearTimeout(t); resolve(); });
@@ -581,7 +674,7 @@ async function handleMicTest(browserWs: WebSocket) {
       type: "session.update",
       session: {
         type: "realtime",
-        instructions: "You are a mic test assistant. Listen to the user and confirm what you hear. Keep responses very short.",
+        instructions: buildMicTestInstructions(language),
         output_modalities: ["audio"],
         audio: {
           input: {
@@ -590,7 +683,7 @@ async function handleMicTest(browserWs: WebSocket) {
             transcription: { model: OPENAI_REALTIME_TRANSCRIPTION_MODEL },
             turn_detection: { type: "server_vad", threshold: 0.5, prefix_padding_ms: 300, silence_duration_ms: 300 },
           },
-          output: { format: { type: "audio/pcm", rate: 24000 }, voice: AZURE_VOICE },
+          output: { format: { type: "audio/pcm", rate: 24000 }, voice: resolveRealtimeVoice(language) },
         },
       },
     }));
@@ -1779,7 +1872,7 @@ async function handleInterview(browserWs: WebSocket, ctx: InterviewContext) {
 
   async function connectOai(): Promise<WebSocket> {
     const ws = new WebSocket(OPENAI_WS_URL, {
-      headers: { "api-key": AZURE_API_KEY },
+      headers: REALTIME_AUTH_HEADERS,
     });
 
     await new Promise<void>((resolve, reject) => {
@@ -1817,7 +1910,7 @@ async function handleInterview(browserWs: WebSocket, ctx: InterviewContext) {
           input: buildRealtimeAudioInputConfig(),
           output: {
             format: { type: "audio/pcm", rate: 24000 },
-            voice: AZURE_VOICE,
+            voice: resolveRealtimeVoice(ctx.language),
           },
         },
         tools: OPENAI_TOOLS,
