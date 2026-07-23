@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { DocsSidebar } from "@/components/docs/docs-sidebar";
 import { DocsHeader } from "@/components/docs/docs-header";
+import { APP_NAME } from "@/lib/branding";
 
 export default function CategoryLayout({
   children,
@@ -24,7 +25,7 @@ export default function CategoryLayout({
 
           <footer className="border-t border-mk-border/60 px-8 lg:px-16 py-5">
             <div className="max-w-3xl flex items-center justify-between text-xs text-mk-text-muted">
-              <span>&copy; {new Date().getFullYear()} Aural. All rights reserved.</span>
+              <span>&copy; {new Date().getFullYear()} {APP_NAME}. All rights reserved.</span>
               <Link
                 href="/"
                 className="hover:text-mk-terracotta transition-colors"

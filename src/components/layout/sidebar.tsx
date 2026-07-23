@@ -7,6 +7,7 @@ import { TourOverlay } from "@/components/tour/tour-overlay";
 import { TourProvider } from "@/components/tour/tour-provider";
 import { TourWelcome } from "@/components/tour/tour-welcome";
 import { AuralLogo } from "@/components/ui/aural-logo";
+import { APP_NAME } from "@/lib/branding";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -197,8 +198,8 @@ export function Sidebar({
         <Link href="/organizations" className="flex items-center gap-1">
           <AuralLogo size={28} className="shrink-0" />
           {!collapsed && (
-            <span className="font-heading text-base font-bold tracking-[2px]">
-              AURAL
+            <span className="font-heading text-base font-bold tracking-[2px] uppercase">
+              {APP_NAME}
             </span>
           )}
         </Link>

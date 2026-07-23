@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { AuralLogo } from "@/components/ui/aural-logo";
+import { APP_NAME } from "@/lib/branding";
 import { DocsSearch } from "./docs-search";
 import { ExternalLink } from "lucide-react";
 
@@ -17,8 +18,8 @@ export function DocsHeader() {
             size={30}
             className="transition-transform duration-300 group-hover:scale-110"
           />
-          <span className="font-heading text-base font-bold tracking-[1.5px] text-mk-text">
-            AURAL
+          <span className="font-heading text-base font-bold tracking-[1.5px] text-mk-text uppercase">
+            {APP_NAME}
           </span>
         </Link>
 

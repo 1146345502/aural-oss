@@ -1,5 +1,6 @@
 import { Providers } from "@/components/providers";
 import { Toaster } from "@/components/ui/toaster";
+import { APP_NAME } from "@/lib/branding";
 import type { Metadata, Viewport } from "next";
 import { Inter, Space_Grotesk } from "next/font/google";
 import "./globals.css";
@@ -23,15 +24,18 @@ const spaceGrotesk = Space_Grotesk({
 });
 
 const siteUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://aural-ai.com";
+const ogImageUrl = process.env.NEXT_PUBLIC_OG_IMAGE_URL ?? `${siteUrl}/images/marketing/hero-screenshots.webp`;
+
+const titleDefault = `${APP_NAME} - AI Interview Platform | Voice & Video Interviews`;
+const description = `${APP_NAME} is the AI interview platform for structured voice, chat, and video interviews. Automate candidate screening, get real-time insights, and scale your interview process.`;
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: {
-    default: "Aural - AI Interview Platform | Voice & Video Interviews",
-    template: "%s | Aural",
+    default: titleDefault,
+    template: `%s | ${APP_NAME}`,
   },
-  description:
-    "Aural is the AI interview platform for structured voice, chat, and video interviews. Automate candidate screening, get real-time insights, and scale your interview process.",
+  description,
   keywords: [
     "AI interview platform",
     "voice interview",
@@ -52,26 +56,24 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     locale: "en_US",
-    siteName: "Aural",
-    title: "Aural - AI Interview Platform | Voice & Video Interviews",
-    description:
-      "Aural is the AI interview platform for structured voice, chat, and video interviews. Automate candidate screening, get real-time insights, and scale your interview process.",
+    siteName: APP_NAME,
+    title: titleDefault,
+    description,
     url: siteUrl,
     images: [
       {
-        url: `${siteUrl}/images/marketing/hero-screenshots.webp`,
+        url: ogImageUrl,
         width: 1920,
         height: 960,
-        alt: "Aural AI Interview Platform",
+        alt: `${APP_NAME} AI Interview Platform`,
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Aural - AI Interview Platform | Voice & Video Interviews",
-    description:
-      "Aural is the AI interview platform for structured voice, chat, and video interviews. Automate candidate screening, get real-time insights, and scale your interview process.",
-    images: [`${siteUrl}/images/marketing/hero-screenshots.webp`],
+    title: titleDefault,
+    description,
+    images: [ogImageUrl],
   },
 };
 

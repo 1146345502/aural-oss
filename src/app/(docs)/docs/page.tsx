@@ -2,12 +2,12 @@ import { CategoryCard } from "@/components/docs/category-card";
 import { DocsHeader } from "@/components/docs/docs-header";
 import { DocsSearch } from "@/components/docs/docs-search";
 import { categories, getCategoryArticles } from "@/content/docs";
+import { APP_NAME } from "@/lib/branding";
 import Link from "next/link";
 
 export const metadata = {
-  title: "Docs | Aural",
-  description:
-    "Learn how to use Aural — guides for interview creators and interviewees.",
+  title: "Docs",
+  description: `Learn how to use ${APP_NAME} — guides for interview creators and interviewees.`,
 };
 
 export default function DocsHomePage() {
@@ -46,7 +46,7 @@ export default function DocsHomePage() {
 
       <footer className="border-t border-mk-border/60 px-8 py-5">
         <div className="max-w-5xl mx-auto flex items-center justify-between text-xs text-mk-text-muted">
-          <span>&copy; {new Date().getFullYear()} Aural. All rights reserved.</span>
+          <span>&copy; {new Date().getFullYear()} {APP_NAME}. All rights reserved.</span>
           <Link href="/" className="hover:text-mk-terracotta transition-colors">
             aural-ai.com
           </Link>

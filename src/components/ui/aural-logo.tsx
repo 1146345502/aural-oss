@@ -14,7 +14,16 @@ const bars = [
   { x: 186, y: 104, h: 48 },
 ];
 
+const LOGO_URL = process.env.NEXT_PUBLIC_LOGO_URL;
+
 export function AuralLogo({ size = 32, className }: AuralLogoProps) {
+  if (LOGO_URL) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img src={LOGO_URL} width={size} height={size} className={className} alt="Logo" />
+    );
+  }
+
   return (
     <svg
       viewBox="0 0 256 256"

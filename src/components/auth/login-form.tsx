@@ -2,6 +2,7 @@
 
 import { useAppLocale } from "@/components/app-locale-provider";
 import { AuralLogo } from "@/components/ui/aural-logo";
+import { APP_NAME } from "@/lib/branding";
 import { Button } from "@/components/ui/button";
 import {
     Card,
@@ -62,7 +63,7 @@ export function LoginForm() {
         <CardTitle className="font-heading text-2xl">
           {t("auth.welcomeBack")}
         </CardTitle>
-        <CardDescription>{t("auth.signInSubtitle")}</CardDescription>
+        <CardDescription>{t("auth.signInSubtitle", { appName: APP_NAME })}</CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
