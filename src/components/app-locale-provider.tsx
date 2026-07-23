@@ -734,8 +734,14 @@ export function AppLocaleProvider({ children }: { children: React.ReactNode }) {
     if (!isExplicit) {
       fetch("/api/locale")
         .then((r) => r.json())
-        .then((data: { locale?: string }) => {
-          if (data.locale === "zh" || data.locale === "en") {
+        .then((data: { locale?: string; country?: string | null }) => {
+          // Keep the browser locale when the server has no real geo signal.
+          // The endpoint's no-country fallback is English and must not
+          // overwrite a Chinese browser preference.
+          if (
+            data.country &&
+            (data.locale === "zh" || data.locale === "en")
+          ) {
             setLocaleState(data.locale);
           }
         })

@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { headers } from "next/headers";
 
 export async function createContext() {
-  const serverClient = createClient();
+  const serverClient = await createClient();
 
   let user = null;
   try {
@@ -15,7 +15,7 @@ export async function createContext() {
 
   if (!user) {
     try {
-      const authorization = headers().get("authorization");
+      const authorization = (await headers()).get("authorization");
       if (authorization?.startsWith("Bearer ")) {
         const { data } = await serverClient.auth.getUser(
           authorization.slice(7),

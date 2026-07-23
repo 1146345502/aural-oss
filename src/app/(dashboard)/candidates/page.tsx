@@ -856,7 +856,10 @@ export default function CandidatesPage() {
   }, [dynamicColumns, frozenCol, processedRows, sourceLabel, statusLabel]);
 
   // ── Cell values ──
-  function getCellValue(row: UnifiedRow, key: string): JSX.Element | string {
+  function getCellValue(
+    row: UnifiedRow,
+    key: string,
+  ): React.JSX.Element | string {
     const c = getCandidateField(row);
     const status = getSessionStatus(row);
     const session = row.session;

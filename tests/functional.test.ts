@@ -60,17 +60,26 @@ async function waitForHttp(url: string, timeoutMs = 60_000): Promise<void> {
 }
 
 function startAppServer(port: number): ChildProcess {
-  const child = spawn("npx", ["next", "dev", "--port", String(port)], {
-    cwd: APP_CWD,
-    env: {
-      ...process.env,
-      NODE_ENV: "development",
-      ENABLE_FUNCTIONAL_TEST_PAGES: "1",
-      NEXT_PUBLIC_VOICE_RELAY_URL: `ws://127.0.0.1:${port}/ws/voice`,
-      NEXT_PUBLIC_OPENAI_VOICE_RELAY_URL: `ws://127.0.0.1:${port}/ws/openai-voice`,
+  const child = spawn(
+    process.execPath,
+    [
+      resolve(APP_CWD, "node_modules/next/dist/bin/next"),
+      "dev",
+      "--port",
+      String(port),
+    ],
+    {
+      cwd: APP_CWD,
+      env: {
+        ...process.env,
+        NODE_ENV: "development",
+        ENABLE_FUNCTIONAL_TEST_PAGES: "1",
+        NEXT_PUBLIC_VOICE_RELAY_URL: `ws://127.0.0.1:${port}/ws/voice`,
+        NEXT_PUBLIC_OPENAI_VOICE_RELAY_URL: `ws://127.0.0.1:${port}/ws/openai-voice`,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
     },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  );
 
   child.stdout?.on("data", (chunk) => {
     process.stdout.write(`[functional-next] ${chunk}`);
@@ -202,6 +211,32 @@ test("code editor loads Monaco with the secured DOMPurify dependency", async () 
     ((await page.locator(".view-lines").textContent()) ?? "").includes("secureEditor"),
     true,
   );
+  assert.deepEqual(pageErrors, []);
+
+  await context.close();
+});
+
+test("whiteboard renders and Mermaid conversion works with patched dependencies", async () => {
+  const context = await browser.newContext({ locale: "en-US" });
+  const page = await context.newPage();
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+
+  await page.goto(`${baseUrl}/functional-tests/whiteboard`);
+  await page.locator(".excalidraw").waitFor({
+    state: "visible",
+    timeout: 20_000,
+  });
+  await waitForCondition(
+    async () =>
+      Number(
+        await page.getByTestId("mermaid-element-count").textContent(),
+      ) > 0,
+    20_000,
+    "Expected Mermaid to produce Excalidraw elements",
+  );
+
+  assert.equal(await page.getByTestId("mermaid-error").textContent(), "");
   assert.deepEqual(pageErrors, []);
 
   await context.close();

@@ -1094,7 +1094,10 @@ export function CandidateManager({
                     const compositeId = `${row.type}-${row.id}`;
                     const c = getCandidateField(row);
 
-                    const cellValues: Record<string, JSX.Element | string> = {
+                    const cellValues: Record<
+                      string,
+                      React.JSX.Element | string
+                    > = {
                       email: (
                         <span className="text-muted-foreground">
                           {row.email || "-"}

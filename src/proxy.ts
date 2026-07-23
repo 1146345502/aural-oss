@@ -2,10 +2,10 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 /**
- * Next.js middleware that refreshes the Supabase auth token on every request.
+ * Next.js proxy that refreshes the Supabase auth token on every request.
  * This is the official Supabase pattern for Next.js App Router.
  */
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   // Skip cookie refresh for mobile requests using Bearer token auth
   if (request.headers.get("authorization")?.startsWith("Bearer ")) {
     return NextResponse.next({ request });

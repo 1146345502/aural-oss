@@ -18,7 +18,7 @@ export async function POST(request: Request) {
     }
 
     // Server-side client with the user's session from cookies
-    const supabase = createClient();
+    const supabase = await createClient();
     const {
       data: { user },
     } = await supabase.auth.getUser();

@@ -27,8 +27,8 @@ async function fetchWithRetry(
  * Server-side Supabase client that uses cookies for auth.
  * Call this in Server Components, Route Handlers, and Server Actions.
  */
-export function createClient() {
-  const cookieStore = cookies();
+export async function createClient() {
+  const cookieStore = await cookies();
 
   return createServerClient<Database>(
     process.env.SUPABASE_URL!,
@@ -45,7 +45,7 @@ export function createClient() {
             );
           } catch {
             // setAll can throw in Server Components (read-only context).
-            // Safe to ignore — the middleware will refresh the session.
+            // Safe to ignore — the proxy will refresh the session.
           }
         },
       },

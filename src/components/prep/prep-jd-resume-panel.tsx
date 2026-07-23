@@ -331,7 +331,7 @@ function PdfUploadButton({
   onFileChosen,
 }: {
   ariaLabel: string;
-  inputRef: React.RefObject<HTMLInputElement>;
+  inputRef: React.RefObject<HTMLInputElement | null>;
   loading: boolean;
   onFileChosen: (file: File) => void;
 }) {

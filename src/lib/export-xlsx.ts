@@ -1,9 +1,8 @@
 import * as XLSX from "xlsx";
 
-export function exportToXlsx(
+export function createXlsxWorkbook(
   rows: Record<string, string | number | null | undefined>[],
-  filename: string,
-) {
+): XLSX.WorkBook {
   const ws = XLSX.utils.json_to_sheet(
     rows.map((r) =>
       Object.fromEntries(
@@ -13,5 +12,12 @@ export function exportToXlsx(
   );
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Data");
-  XLSX.writeFile(wb, `${filename}.xlsx`);
+  return wb;
+}
+
+export function exportToXlsx(
+  rows: Record<string, string | number | null | undefined>[],
+  filename: string,
+) {
+  XLSX.writeFile(createXlsxWorkbook(rows), `${filename}.xlsx`);
 }

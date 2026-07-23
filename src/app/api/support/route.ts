@@ -26,7 +26,7 @@ export async function POST(request: Request) {
   }
 
   const files = formData.getAll("attachments") as File[];
-  const supabase = createClient();
+  const supabase = await createClient();
   const uploadResults = await Promise.all(
     files
       .filter((file) => file.size > 0)
