@@ -27,7 +27,7 @@
   <a href="https://github.com/1146345502/aural-oss/actions/workflows/ci.yml"><img src="https://github.com/1146345502/aural-oss/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" /></a>
   <a href="https://github.com/1146345502/aural-oss/releases/latest"><img src="https://img.shields.io/github/v/release/1146345502/aural-oss?color=orange" alt="Latest Release" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License" /></a>
-  <img src="https://img.shields.io/badge/node-%3E%3D18-brightgreen" alt="Node 18+" />
+  <img src="https://img.shields.io/badge/node-%3E%3D20.9-brightgreen" alt="Node 20.9+" />
   <img src="https://img.shields.io/badge/Next.js-14-black" alt="Next.js 14" />
   <img src="https://img.shields.io/badge/TypeScript-5-3178c6" alt="TypeScript" />
   <img src="https://img.shields.io/badge/Supabase-PostgreSQL-3ecf8e" alt="Supabase" />
@@ -365,7 +365,7 @@ Run Aural on your own servers for full control over data, configuration, and cus
 
 #### Prerequisites
 
-- **Node.js** 18+ and npm
+- **Node.js** 20.9+ and npm
 - **Supabase** project (cloud or local via `supabase start`)
 - **LLM API key** — at least one of: OpenAI, Google Gemini, Kimi (Moonshot), or MiniMax
 - **Voice relay credentials** — Volcengine Doubao (primary) or Azure OpenAI (backup), if you want voice interviews or voice practice
