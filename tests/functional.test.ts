@@ -60,17 +60,26 @@ async function waitForHttp(url: string, timeoutMs = 60_000): Promise<void> {
 }
 
 function startAppServer(port: number): ChildProcess {
-  const child = spawn("npx", ["next", "dev", "--port", String(port)], {
-    cwd: APP_CWD,
-    env: {
-      ...process.env,
-      NODE_ENV: "development",
-      ENABLE_FUNCTIONAL_TEST_PAGES: "1",
-      NEXT_PUBLIC_VOICE_RELAY_URL: `ws://127.0.0.1:${port}/ws/voice`,
-      NEXT_PUBLIC_OPENAI_VOICE_RELAY_URL: `ws://127.0.0.1:${port}/ws/openai-voice`,
+  const child = spawn(
+    process.execPath,
+    [
+      resolve(APP_CWD, "node_modules/next/dist/bin/next"),
+      "dev",
+      "--port",
+      String(port),
+    ],
+    {
+      cwd: APP_CWD,
+      env: {
+        ...process.env,
+        NODE_ENV: "development",
+        ENABLE_FUNCTIONAL_TEST_PAGES: "1",
+        NEXT_PUBLIC_VOICE_RELAY_URL: `ws://127.0.0.1:${port}/ws/voice`,
+        NEXT_PUBLIC_OPENAI_VOICE_RELAY_URL: `ws://127.0.0.1:${port}/ws/openai-voice`,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
     },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  );
 
   child.stdout?.on("data", (chunk) => {
     process.stdout.write(`[functional-next] ${chunk}`);

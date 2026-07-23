@@ -37,6 +37,14 @@ jobs:
 
       - name: Functional product tests
         run: npm run test:functional
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+          NEXT_PUBLIC_SUPABASE_URL: https://build-placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: build-placeholder
+          SUPABASE_URL: https://build-placeholder.supabase.co
+          SUPABASE_ANON_KEY: build-placeholder
+          SUPABASE_SERVICE_ROLE_KEY: build-placeholder
+          GEMINI_API_KEY: build-placeholder
 
       - name: Build
         run: npm run build
