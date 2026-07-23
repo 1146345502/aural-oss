@@ -66,11 +66,34 @@ export function looksLikeHtml(value: string): boolean {
   return /<\/?[a-z][^>]*>/i.test(value);
 }
 
+/**
+ * Server rendering does not have a DOM parser. Reduce markup to plain text with
+ * a small state machine so nested angle brackets cannot defeat tag stripping.
+ */
+function stripMarkupForSsr(html: string): string {
+  let text = "";
+  let insideTag = false;
+
+  for (const character of html) {
+    if (character === "<") {
+      insideTag = true;
+      continue;
+    }
+    if (character === ">") {
+      insideTag = false;
+      continue;
+    }
+    if (!insideTag) text += character;
+  }
+
+  return text;
+}
+
 /** Allowlist sanitizer: strips attributes, unwraps unknown tags, drops dangerous ones. */
 export function sanitizeRichHtml(html: string): string {
   if (typeof window === "undefined") {
     // SSR fallback: never emit markup we could not sanitize.
-    return html.replace(/<[^>]*>/g, "");
+    return stripMarkupForSsr(html);
   }
   const doc = new DOMParser().parseFromString(html, "text/html");
   const walk = (node: Element) => {
