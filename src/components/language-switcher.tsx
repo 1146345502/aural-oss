@@ -13,7 +13,7 @@ export function LanguageSwitcher({ compact = false }: { compact?: boolean }) {
         compact && "scale-95",
       )}
     >
-      {(["en", "zh"] as const).map((option) => (
+      {(["en", "fr", "zh"] as const).map((option) => (
         <button
           key={option}
           type="button"
@@ -25,7 +25,11 @@ export function LanguageSwitcher({ compact = false }: { compact?: boolean }) {
               : "text-muted-foreground hover:text-foreground",
           )}
         >
-          {option === "en" ? t("common.english") : t("common.chinese")}
+          {option === "en"
+            ? t("common.english")
+            : option === "zh"
+              ? t("common.chinese")
+              : t("common.french")}
         </button>
       ))}
     </div>
