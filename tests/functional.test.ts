@@ -188,6 +188,25 @@ test("login honors browser locale and persisted locale cache", async () => {
   await cachedContext.close();
 });
 
+test("code editor loads Monaco with the secured DOMPurify dependency", async () => {
+  const context = await browser.newContext({ locale: "en-US" });
+  const page = await context.newPage();
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+
+  await page.goto(`${baseUrl}/functional-tests/code-editor`);
+  await page.locator(".monaco-editor").waitFor({ state: "visible", timeout: 20_000 });
+
+  assert.equal(await page.locator("select").inputValue(), "typescript");
+  assert.equal(
+    ((await page.locator(".view-lines").textContent()) ?? "").includes("secureEditor"),
+    true,
+  );
+  assert.deepEqual(pageErrors, []);
+
+  await context.close();
+});
+
 test("English interviews try the voice relay first and fail over to OpenAI", async () => {
   const context = await browser.newContext({ locale: "en-US" });
   const page = await context.newPage();
