@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { DEFAULT_ADMIN_LOCALE } from "@/lib/admin-locale";
 
 const CHINA_COUNTRY_CODES = new Set(["CN", "HK", "MO", "TW"]);
 const FRENCH_COUNTRY_CODES = new Set(["FR", "BE", "LU", "MC"]);
@@ -16,7 +17,7 @@ export function GET(request: NextRequest) {
       ? "zh"
       : normalizedCountry && FRENCH_COUNTRY_CODES.has(normalizedCountry)
         ? "fr"
-        : "en";
+        : DEFAULT_ADMIN_LOCALE;
 
   return NextResponse.json({ locale: suggestedLocale, country });
 }

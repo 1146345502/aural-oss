@@ -1,8 +1,9 @@
 "use client";
 
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { DEFAULT_ADMIN_LOCALE, type AdminLocale } from "@/lib/admin-locale";
 
-type AppLocale = "en" | "zh" | "fr";
+type AppLocale = AdminLocale;
 
 type TranslationMap = Record<AppLocale, Record<string, string>>;
 
@@ -1062,7 +1063,7 @@ const translations: TranslationMap = {
 const AppLocaleContext = createContext<AppLocaleContextValue | null>(null);
 
 function resolveInitialLocale(): { locale: AppLocale; isExplicit: boolean } {
-  if (typeof window === "undefined") return { locale: "en", isExplicit: false };
+  if (typeof window === "undefined") return { locale: DEFAULT_ADMIN_LOCALE, isExplicit: false };
   const stored = window.localStorage.getItem(STORAGE_KEY);
   if (stored === "zh" || stored === "en" || stored === "fr") return { locale: stored, isExplicit: true };
   const browserLanguage = window.navigator.language.toLowerCase();
@@ -1070,7 +1071,7 @@ function resolveInitialLocale(): { locale: AppLocale; isExplicit: boolean } {
     ? "zh"
     : browserLanguage.startsWith("fr")
       ? "fr"
-      : "en";
+      : DEFAULT_ADMIN_LOCALE;
   return { locale: browserLocale, isExplicit: false };
 }
 
@@ -1085,7 +1086,7 @@ function interpolate(
 }
 
 export function AppLocaleProvider({ children }: { children: React.ReactNode }) {
-  const [locale, setLocaleState] = useState<AppLocale>("en");
+  const [locale, setLocaleState] = useState<AppLocale>(DEFAULT_ADMIN_LOCALE);
 
   useEffect(() => {
     const { locale: initial, isExplicit } = resolveInitialLocale();
