@@ -41,3 +41,8 @@ test-results/
 # Misc
 *.pem
 .vercel
+
+# Claude Code
+.claude/
+!.claude/settings.json
+.claude/settings.local.json
