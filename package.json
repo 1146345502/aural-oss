@@ -21,7 +21,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test:web": "node --import tsx --test tests/abort-error.test.ts tests/account-deletion.test.ts tests/ai-generator-run.test.ts tests/answer-audio.test.ts tests/answer-quality.test.ts tests/answer-targets.test.ts tests/api-key-auth.test.ts tests/api-rate-limit.test.ts tests/asr-interim.test.ts tests/coach-tts-text.test.ts tests/interview-prep-prompts.test.ts tests/interview-templates.test.ts tests/openai-voice-relay-helpers.test.ts tests/parse-partial-feedback-json.test.ts tests/pdf-export.test.ts tests/playback-jitter-buffer.test.ts tests/practice-resume-state.test.ts tests/prep-answer-audio-retention.test.ts tests/prep-answer-quality.test.ts tests/prep-question-options.test.ts tests/prep-suggested-answer-cache.test.ts tests/reauth-otp.test.ts tests/relay-llm.test.ts tests/relay-routing.test.ts tests/security-regressions.test.ts tests/session-lifecycle.test.ts tests/session-score.test.ts tests/svg-conversion.test.ts tests/transcript-commit.test.ts tests/url-fetch.test.ts tests/voice-relay-helpers.test.ts tests/voice-relay-prompts.test.ts tests/voice-relay-reconnect.test.ts tests/voice-save-route.test.ts tests/volcengine-asr.test.ts tests/volcengine-tts.test.ts",
+    "test:web": "node --import tsx --test tests/abort-error.test.ts tests/account-deletion.test.ts tests/ai-generator-run.test.ts tests/answer-audio.test.ts tests/answer-quality.test.ts tests/answer-targets.test.ts tests/api-key-auth.test.ts tests/api-rate-limit.test.ts tests/asr-interim.test.ts tests/candidate-xlsx.test.ts tests/coach-tts-text.test.ts tests/interview-prep-prompts.test.ts tests/interview-templates.test.ts tests/openai-voice-relay-helpers.test.ts tests/parse-partial-feedback-json.test.ts tests/pdf-export.test.ts tests/playback-jitter-buffer.test.ts tests/practice-resume-state.test.ts tests/prep-answer-audio-retention.test.ts tests/prep-answer-quality.test.ts tests/prep-question-options.test.ts tests/prep-suggested-answer-cache.test.ts tests/reauth-otp.test.ts tests/relay-llm.test.ts tests/relay-routing.test.ts tests/security-regressions.test.ts tests/session-lifecycle.test.ts tests/session-score.test.ts tests/svg-conversion.test.ts tests/transcript-commit.test.ts tests/url-fetch.test.ts tests/voice-relay-helpers.test.ts tests/voice-relay-prompts.test.ts tests/voice-relay-reconnect.test.ts tests/voice-save-route.test.ts tests/volcengine-asr.test.ts tests/volcengine-tts.test.ts",
     "test:functional": "node --import tsx --test --test-concurrency=1 tests/functional.test.ts",
     "db:types": "npx supabase gen types typescript --local > src/lib/supabase/types.ts",
     "dev:voice": "npx tsx server/voice-relay.ts",
@@ -84,7 +84,7 @@
     "tailwind-merge": "^3.4.0",
     "tailwindcss-animate": "^1.0.7",
     "utf-8-validate": "^6.0.6",
-    "xlsx": "^0.18.5",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "zod": "^4.3.6"
   },
   "devDependencies": {
@@ -101,9 +101,14 @@
     "tailwindcss": "^3.4.1",
     "tsx": "^4.23.1",
     "typescript": "^5",
-    "ws": "^8.19.0"
+    "ws": "^8.21.1"
   },
   "overrides": {
-    "dompurify": "3.4.12"
+    "@next/eslint-plugin-next": {
+      "glob": "10.5.0"
+    },
+    "dompurify": "3.4.12",
+    "lodash-es": "4.18.1",
+    "nanoid": "3.3.16"
   }
 }

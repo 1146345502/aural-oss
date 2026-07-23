@@ -9,157 +9,21 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
+import {
+  downloadCandidateImportTemplate,
+  MAX_CANDIDATE_IMPORT_FILE_BYTES,
+  parseCandidateWorkbook,
+  type ParsedCandidate,
+} from "@/lib/candidate-xlsx";
 import { trpc } from "@/lib/trpc/client";
 import { CheckCircle2, FileText, Loader2, Upload } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
-import * as XLSX from "xlsx";
 
 interface CandidateImportDialogProps {
   interviewId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onImported: () => void;
-}
-
-interface ParsedCandidate {
-  name: string;
-  email?: string;
-  phone?: string;
-  gender?: string;
-  birthday?: string;
-  education?: string;
-  school?: string;
-  major?: string;
-  graduationYear?: number;
-  workExperience?: string;
-}
-
-const TEMPLATE_HEADERS = [
-  "Name",
-  "Email",
-  "Phone",
-  "Gender",
-  "Birthday",
-  "Education",
-  "School",
-  "Major",
-  "Graduation Year",
-  "Work Experience",
-];
-
-const INSTRUCTIONS = [
-  "Import Instructions",
-  '1. Fields marked with * are required. If they are not filled in, the entire line will not be imported.',
-  '2. "Name" *: participant\'s full name.',
-  '3. "Email": valid email address, optional.',
-  '4. "Phone": phone number with country code, optional.',
-  '5. "Gender": options: Male, Female, Other.',
-  '6. "Birthday": fill in the format of YYYY-MM, such as "1996-06".',
-  '7. "Education": single choice, options: College, Bachelor, Master, PhD, MBA, Other.',
-  '8. "School": school name.',
-  '9. "Major": field of study.',
-  '10. "Graduation Year": graduation year of the highest degree, fill in the format of YYYY, such as "2019".',
-  '11. "Work Experience": options: Less than one year, 1 - 3 years, 3 - 5 years, 5 - 10 years, More than 10 years.',
-  "12. Upload up to 10,000 records at a time.",
-];
-
-function generateTemplate(): void {
-  const instructionRows: (string | number)[][] = INSTRUCTIONS.map((line) => [line]);
-  const data = [
-    ...instructionRows,
-    TEMPLATE_HEADERS,
-    ["Jane Smith", "jane@example.com", "+1234567890", "Female", "1996-06", "Bachelor", "MIT", "Computer Science", 2023, "1 - 3 years"],
-    ["Bob Wang", "bob@example.com", "+9876543210", "Male", "1998-01", "Master", "Stanford University", "Data Science", 2025, "Less than one year"],
-  ];
-
-  const ws = XLSX.utils.aoa_to_sheet(data);
-  const numCols = TEMPLATE_HEADERS.length;
-
-  // Set column widths
-  ws["!cols"] = TEMPLATE_HEADERS.map((h) => ({
-    wch: Math.max(h.length + 4, 18),
-  }));
-
-  // Merge each instruction row across all columns so text doesn't overflow
-  ws["!merges"] = INSTRUCTIONS.map((_, i) => ({
-    s: { r: i, c: 0 },
-    e: { r: i, c: numCols - 1 },
-  }));
-
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Sessions");
-  XLSX.writeFile(wb, "Candidate_Import_Template.xlsx");
-}
-
-function parseExcel(data: ArrayBuffer): ParsedCandidate[] {
-  const wb = XLSX.read(data, { type: "array" });
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  if (!ws) return [];
-
-  // Convert entire sheet to array-of-arrays to find the header row
-  const allRows = XLSX.utils.sheet_to_json<(string | number | null)[]>(ws, {
-    header: 1,
-    defval: "",
-  });
-
-  // Find the header row by looking for "Name" in the first cell
-  let headerIndex = -1;
-  for (let i = 0; i < allRows.length; i++) {
-    const firstCell = String(allRows[i]?.[0] ?? "").toLowerCase().trim();
-    if (firstCell === "name") {
-      headerIndex = i;
-      break;
-    }
-  }
-
-  if (headerIndex === -1) return [];
-
-  const headers = (allRows[headerIndex] as (string | number | null)[]).map((h) =>
-    String(h ?? "").toLowerCase().trim(),
-  );
-
-  const results: ParsedCandidate[] = [];
-
-  for (let i = headerIndex + 1; i < allRows.length; i++) {
-    const row = allRows[i] as (string | number | null)[];
-    if (!row || row.every((c) => !c && c !== 0)) continue;
-
-    // Build a normalized key-value map from headers
-    const normalized: Record<string, string> = {};
-    headers.forEach((key, idx) => {
-      normalized[key] = String(row[idx] ?? "").trim();
-    });
-
-    const name = normalized["name"] || "";
-    if (!name) continue;
-
-    const candidate: ParsedCandidate = { name };
-
-    const email = normalized["email"] || normalized["e-mail"] || "";
-    if (email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      candidate.email = email.toLowerCase();
-    }
-
-    if (normalized["phone"]) candidate.phone = normalized["phone"];
-    if (normalized["gender"]) candidate.gender = normalized["gender"];
-    if (normalized["birthday"]) candidate.birthday = normalized["birthday"];
-    if (normalized["education"]) candidate.education = normalized["education"];
-    if (normalized["school"]) candidate.school = normalized["school"];
-    if (normalized["major"]) candidate.major = normalized["major"];
-
-    const gradYear = normalized["graduation year"] || normalized["graduationyear"] || "";
-    if (gradYear) {
-      const yr = parseInt(gradYear, 10);
-      if (!isNaN(yr)) candidate.graduationYear = yr;
-    }
-
-    const workExp = normalized["work experience"] || normalized["workexperience"] || "";
-    if (workExp) candidate.workExperience = workExp;
-
-    results.push(candidate);
-  }
-
-  return results;
 }
 
 type Step = "upload" | "preview" | "complete";
@@ -197,21 +61,43 @@ export function CandidateImportDialog({
       const file = e.target.files?.[0];
       if (!file) return;
 
+      if (file.size > MAX_CANDIDATE_IMPORT_FILE_BYTES) {
+        toast({
+          title: "Workbook is too large",
+          description: "Upload a workbook smaller than 10 MB.",
+          variant: "destructive",
+        });
+        e.target.value = "";
+        return;
+      }
+
       setFileName(file.name);
       const reader = new FileReader();
       reader.onload = (ev) => {
-        const data = ev.target?.result as ArrayBuffer;
-        const parsed = parseExcel(data);
-        if (parsed.length === 0) {
+        try {
+          const data = ev.target?.result as ArrayBuffer;
+          const parsed = parseCandidateWorkbook(data);
+          if (parsed.length === 0) {
+            toast({
+              title: "No valid sessions found",
+              description:
+                'Make sure your file has a "Name" column header in the first row.',
+              variant: "destructive",
+            });
+            return;
+          }
+          setCandidates(parsed);
+          setStep("preview");
+        } catch (error) {
           toast({
-            title: "No valid sessions found",
-            description: 'Make sure your file has a "Name" column header in the first row.',
+            title: "Could not read workbook",
+            description:
+              error instanceof Error
+                ? error.message
+                : "The workbook is malformed or unsupported.",
             variant: "destructive",
           });
-          return;
         }
-        setCandidates(parsed);
-        setStep("preview");
       };
       reader.readAsArrayBuffer(file);
     },
@@ -295,7 +181,7 @@ export function CandidateImportDialog({
                   <button
                     type="button"
                     className="font-medium text-primary hover:underline"
-                    onClick={generateTemplate}
+            onClick={downloadCandidateImportTemplate}
                   >
                     Candidate_Import_Template.xlsx
                   </button>{" "}
