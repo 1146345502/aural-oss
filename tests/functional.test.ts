@@ -150,6 +150,14 @@ after(async () => {
   await stopProcess(serverProcess);
 });
 
+test("the arbitrary recording URL proxy is not exposed", async () => {
+  const response = await fetch(
+    `${baseUrl}/api/download/recording?url=${encodeURIComponent(`${baseUrl}/login`)}`,
+  );
+
+  assert.equal(response.status, 404);
+});
+
 test("login defaults to English and no longer shows a language toggle", async () => {
   const context = await browser.newContext({ locale: "en-US" });
   const page = await context.newPage();
