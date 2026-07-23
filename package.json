@@ -25,7 +25,7 @@
     "dev:openai-voice": "npx tsx server/openai-voice-relay.ts"
   },
   "dependencies": {
-    "@excalidraw/excalidraw": "^0.18.0",
+    "@excalidraw/excalidraw": "^0.18.1",
     "@google/genai": "^2.6.0",
     "@hookform/resolvers": "^5.2.2",
     "@monaco-editor/react": "^4.7.0",
