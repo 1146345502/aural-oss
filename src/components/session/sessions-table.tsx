@@ -442,7 +442,10 @@ export function SessionsTable({
   };
 
   // ── Cell value renderer ──
-  function getCellValue(session: SessionRow, key: string): JSX.Element | string {
+  function getCellValue(
+    session: SessionRow,
+    key: string,
+  ): React.JSX.Element | string {
     switch (key) {
       case "participant":
         return <span>{session.participantName || "Anonymous"}</span>;

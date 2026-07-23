@@ -694,7 +694,7 @@ function MicCheck({ done, onDone, language, allowSkip = true }: { done: boolean;
         let playTime = ctx.currentTime;
         let leftover: Uint8Array | null = null;
 
-        // eslint-disable-next-line no-constant-condition
+
         while (true) {
           const { done: readerDone, value } = await reader.read();
           if (readerDone || !value || value.length === 0) break;

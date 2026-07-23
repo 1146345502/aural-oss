@@ -54,7 +54,7 @@ export type ChatComposerProps = {
   disabled?: boolean;
   submitDisabled?: boolean;
   minLength?: number;
-  textareaRef?: RefObject<HTMLTextAreaElement>;
+  textareaRef?: RefObject<HTMLTextAreaElement | null>;
   /** Receives an imperative control handle (voice start / focus). */
   controlRef?: MutableRefObject<ChatComposerControl | null>;
   className?: string;

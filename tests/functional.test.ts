@@ -207,6 +207,32 @@ test("code editor loads Monaco with the secured DOMPurify dependency", async () 
   await context.close();
 });
 
+test("whiteboard renders and Mermaid conversion works with patched dependencies", async () => {
+  const context = await browser.newContext({ locale: "en-US" });
+  const page = await context.newPage();
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+
+  await page.goto(`${baseUrl}/functional-tests/whiteboard`);
+  await page.locator(".excalidraw").waitFor({
+    state: "visible",
+    timeout: 20_000,
+  });
+  await waitForCondition(
+    async () =>
+      Number(
+        await page.getByTestId("mermaid-element-count").textContent(),
+      ) > 0,
+    20_000,
+    "Expected Mermaid to produce Excalidraw elements",
+  );
+
+  assert.equal(await page.getByTestId("mermaid-error").textContent(), "");
+  assert.deepEqual(pageErrors, []);
+
+  await context.close();
+});
+
 test("English interviews try the voice relay first and fail over to OpenAI", async () => {
   const context = await browser.newContext({ locale: "en-US" });
   const page = await context.newPage();

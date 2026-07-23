@@ -287,11 +287,11 @@ function SessionDetail({
     const fileName = `${title.replace(/\s+/g, "_")}_${participant.replace(/\s+/g, "_")}_report.pdf`;
 
     // Let user choose save location first (Chrome/Edge)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
     let fileHandle: any = null;
     try {
       if ("showSaveFilePicker" in window) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
         fileHandle = await (window as any).showSaveFilePicker({
           suggestedName: fileName,
           types: [
@@ -1123,7 +1123,7 @@ function SessionDetail({
 
             {/* Code Snippets */}
             {(() => {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
               const codeMsgs = summary.data?.messages.filter(
                 (m: any) => (m.contentType as string) === "CODE",
               );

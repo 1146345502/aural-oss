@@ -32,6 +32,12 @@ jobs:
       - name: Test
         run: npm run test:web --if-present
 
+      - name: Install functional-test browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Functional product tests
+        run: npm run test:functional
+
       - name: Build
         run: npm run build
         env:

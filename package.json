@@ -20,7 +20,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint .",
     "test:web": "node --import tsx --test tests/abort-error.test.ts tests/account-deletion.test.ts tests/ai-generator-run.test.ts tests/answer-audio.test.ts tests/answer-quality.test.ts tests/answer-targets.test.ts tests/api-key-auth.test.ts tests/api-rate-limit.test.ts tests/asr-interim.test.ts tests/candidate-xlsx.test.ts tests/coach-tts-text.test.ts tests/interview-prep-prompts.test.ts tests/interview-templates.test.ts tests/openai-voice-relay-helpers.test.ts tests/parse-partial-feedback-json.test.ts tests/pdf-export.test.ts tests/playback-jitter-buffer.test.ts tests/practice-resume-state.test.ts tests/prep-answer-audio-retention.test.ts tests/prep-answer-quality.test.ts tests/prep-question-options.test.ts tests/prep-suggested-answer-cache.test.ts tests/reauth-otp.test.ts tests/relay-llm.test.ts tests/relay-routing.test.ts tests/security-regressions.test.ts tests/session-lifecycle.test.ts tests/session-score.test.ts tests/svg-conversion.test.ts tests/transcript-commit.test.ts tests/url-fetch.test.ts tests/voice-relay-helpers.test.ts tests/voice-relay-prompts.test.ts tests/voice-relay-reconnect.test.ts tests/voice-save-route.test.ts tests/volcengine-asr.test.ts tests/volcengine-tts.test.ts",
     "test:functional": "node --import tsx --test --test-concurrency=1 tests/functional.test.ts",
     "db:types": "npx supabase gen types typescript --local > src/lib/supabase/types.ts",
@@ -32,7 +32,6 @@
     "@google/genai": "^2.6.0",
     "@hookform/resolvers": "^5.2.2",
     "@monaco-editor/react": "^4.7.0",
-    "monaco-editor": "^0.56.0",
     "@radix-ui/react-alert-dialog": "^1.1.15",
     "@radix-ui/react-avatar": "^1.1.11",
     "@radix-ui/react-checkbox": "^1.3.3",
@@ -69,13 +68,14 @@
     "jose": "^6.2.0",
     "jspdf": "^4.2.1",
     "lucide-react": "^0.564.0",
-    "next": "14.2.35",
+    "monaco-editor": "^0.56.0",
+    "next": "^16.2.11",
     "next-themes": "^0.4.6",
     "openai": "^6.22.0",
     "pdf-parse": "^1.1.1",
     "prism-react-renderer": "^2.4.1",
-    "react": "^18",
-    "react-dom": "^18",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "react-hook-form": "^7.71.1",
     "recharts": "^3.7.0",
     "server-only": "^0.0.1",
@@ -90,11 +90,11 @@
   "devDependencies": {
     "@types/canvas-confetti": "^1.9.0",
     "@types/node": "^20",
-    "@types/react": "^18",
-    "@types/react-dom": "^18",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
     "@types/ws": "^8.18.1",
-    "eslint": "^8",
-    "eslint-config-next": "14.2.35",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^16.2.11",
     "pg": "^8.18.0",
     "playwright": "^1.58.2",
     "postcss": "^8",
@@ -104,11 +104,15 @@
     "ws": "^8.21.1"
   },
   "overrides": {
-    "@next/eslint-plugin-next": {
-      "glob": "10.5.0"
+    "@excalidraw/excalidraw": {
+      "nanoid": "3.3.16"
+    },
+    "@excalidraw/mermaid-to-excalidraw": {
+      "nanoid": "5.1.6"
     },
     "dompurify": "3.4.12",
     "lodash-es": "4.18.1",
-    "nanoid": "3.3.16"
+    "postcss": "$postcss",
+    "sharp": "$sharp"
   }
 }

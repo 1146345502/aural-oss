@@ -10,7 +10,7 @@ import { headers } from "next/headers";
 export async function getAuthUser() {
   // 1. Try cookie-based auth (web)
   try {
-    const supabase = createClient();
+    const supabase = await createClient();
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -21,8 +21,9 @@ export async function getAuthUser() {
 
   // 2. Try Bearer token auth (mobile)
   try {
-    const reqHeaders = headers();
-    const authHeader = reqHeaders.get("authorization") ?? reqHeaders.get("Authorization");
+    const reqHeaders = await headers();
+    const authHeader =
+      reqHeaders.get("authorization") ?? reqHeaders.get("Authorization");
     if (authHeader?.startsWith("Bearer ")) {
       const token = authHeader.slice(7);
       const { data, error } = await supabaseAdmin.auth.getUser(token);
