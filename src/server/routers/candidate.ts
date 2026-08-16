@@ -441,7 +441,7 @@ export const candidateRouter = router({
       const { data: candidate } = await ctx.supabase
         .from("candidates")
         .select(
-          "*, session:sessions(*), interview:interviews(*, questions(*))",
+          "*, session:sessions(*, messages(*)), interview:interviews(*, questions(*))",
         )
         .eq("inviteToken", input.token)
         .single();

@@ -97,6 +97,101 @@ export function responseInvitesUserReply(text: string, isZh: boolean): boolean {
   return patterns.some((pattern) => pattern.test(normalized));
 }
 
+export type ActiveSpeechHoldAction = "release" | "hold" | "rotate";
+
+/**
+ * Active microphone input must remain authoritative over a time-based ASR
+ * backstop. Rotate a long-running provider session instead of publishing a
+ * partial utterance while the participant is still speaking.
+ */
+export function activeSpeechHoldAction(input: {
+  micStillActive: boolean;
+  heldForMs: number;
+  maxHoldMs: number;
+  rotationRecoveryActive?: boolean;
+}): ActiveSpeechHoldAction {
+  if (input.rotationRecoveryActive) return "hold";
+  if (!input.micStillActive) return "release";
+  if (input.maxHoldMs > 0 && input.heldForMs >= input.maxHoldMs) return "rotate";
+  return "hold";
+}
+
+/**
+ * Legacy clients do not acknowledge browser playback. For those clients, wait
+ * from the first audio chunk (not the pre-request TTS start) so provider
+ * time-to-first-byte cannot make the relay transition early.
+ */
+export function playbackAckFallbackMs(
+  totalAudioBytes: number,
+  elapsedSinceFirstAudioMs: number,
+): number {
+  const playbackDurationMs = Math.max(0, totalAudioBytes) / 48;
+  const remainingPlaybackMs =
+    playbackDurationMs - Math.max(0, elapsedSinceFirstAudioMs);
+  return Math.min(
+    120_000,
+    Math.max(1_500, Math.ceil(remainingPlaybackMs + 1_000)),
+  );
+}
+
+/** Raw ASR turns per follow-up before the budget is charged anyway. Guards
+ *  against a question looping when every follow-up gets barged in on. */
+const MAX_TURNS_PER_UNHEARD_FOLLOW_UP = 3;
+
+/** Turns the participant may spend on greetings or "could you repeat that?"
+ *  before a spent follow-up budget forces the interview forward regardless. */
+const MAX_UNANSWERED_TURNS_BEFORE_ADVANCE = 2;
+
+/**
+ * Follow-ups charged against the current question's budget.
+ *
+ * ASR splits a single spoken answer into several finals, and a follow-up that
+ * got barged in on never reached the participant, so raw turn counts overstate
+ * what was actually asked. Count the follow-ups the participant heard in full
+ * instead — the question announcement is not tracked in the transcript, so every
+ * assistant entry there is a follow-up that finished playing. The raw-turn
+ * fallback keeps a question from looping when playback keeps getting cut short.
+ */
+export function countFollowUpsSpent(input: {
+  transcript: Array<{ role: "user" | "assistant" }>;
+  userTurns: number;
+}): number {
+  const heard = input.transcript.reduce(
+    (count, entry) => (entry.role === "assistant" ? count + 1 : count),
+    0,
+  );
+  const rawExchanges = Math.max(0, input.userTurns - 1);
+  return Math.max(
+    heard,
+    Math.floor(rawExchanges / MAX_TURNS_PER_UNHEARD_FOLLOW_UP),
+  );
+}
+
+/** Enough substance to be an answer rather than a greeting, a mic check or a
+ *  request to repeat the question — each of which arrives as its own ASR turn. */
+export function looksLikeSubstantiveAnswer(text: string, isZh: boolean): boolean {
+  const trimmed = text.trim();
+  if (isZh) return trimmed.replace(/\s+/g, "").length >= 20;
+  return trimmed.split(/\s+/).filter(Boolean).length >= 12;
+}
+
+/**
+ * Whether the current question has an answer on record, so a spent follow-up
+ * budget may force a transition. Bounded by turn count as well, or a participant
+ * who only ever gives terse replies would never move forward.
+ */
+export function hasAnsweredCurrentQuestion(input: {
+  transcript: Array<{ role: "user" | "assistant"; text: string }>;
+  userTurns: number;
+  isZh: boolean;
+}): boolean {
+  if (input.userTurns > MAX_UNANSWERED_TURNS_BEFORE_ADVANCE) return true;
+  return input.transcript.some(
+    (entry) =>
+      entry.role === "user" && looksLikeSubstantiveAnswer(entry.text, input.isZh),
+  );
+}
+
 export function finalizeTurnBudgetResponse(input: {
   response: string;
   nextToken: string;
@@ -568,7 +663,16 @@ export function shouldSuppressAnsweredAsrFinal(
 
   const answeredKey = normalizeAsrComparisonText(answered);
   const textKey = normalizeAsrComparisonText(text);
-  return answeredKey === textKey || isAsrRollingRevision(answered, text);
+  if (answeredKey === textKey) return true;
+
+  // A short acknowledgement can legitimately start the participant's next answer
+  // (for example, "Yes." followed by "Yes, and so I think..."). Do not treat the
+  // later, substantially longer turn as a rolling revision of the acknowledgement.
+  const answeredUnits = asrComparisonUnits(answered).length;
+  const incomingUnits = asrComparisonUnits(text).length;
+  if (answeredUnits <= 2 && incomingUnits >= answeredUnits + 3) return false;
+
+  return isAsrRollingRevision(answered, text);
 }
 
 export interface RecentAsrFinal {
@@ -693,13 +797,156 @@ export function trimCrossTurnOverlap(previous: string, incoming: string): string
   return incoming;
 }
 
-export function mergePendingAsrInterim(
-  existing: string,
-  incoming: string,
-): { text: string; changed: boolean } {
-  const text = mergeAsrSegments(existing, incoming);
+/**
+ * Volcengine runs with `result_type: "full"`, so every response packet repeats the whole
+ * transcript for the session: all endpointed sentence segments plus the one in progress.
+ * Treating each `utterances[]` entry as a fresh result therefore re-delivers finished
+ * segments on every audio packet. Track the provider's own cumulative text instead and use
+ * the segment list only to learn whether the newest segment has been endpointed.
+ */
+export interface AsrSessionState {
+  /** Latest cumulative transcript the provider reported for this websocket session. */
+  sessionText: string;
+  /** Portion of `sessionText` already committed as a user turn. */
+  committedPrefix: string;
+  /** Last uncommitted text handed to the relay, for exact change detection. */
+  lastEmittedText: string;
+  /** Endpointing state of the last update, so a settled segment is reported once. */
+  lastEmittedDefinite: boolean;
+}
+
+export interface AsrResultPacket {
+  text?: string;
+  utterances?: readonly { text?: string; definite?: boolean }[];
+  isLastPackage?: boolean;
+}
+
+export interface AsrSessionUpdate {
+  /** Speech in this session that has not been committed as a turn yet. */
+  text: string;
+  /** Whether the provider has endpointed the newest segment. */
+  definite: boolean;
+  /** Whether this update says anything the previous one did not. */
+  changed: boolean;
+}
+
+export function createAsrSessionState(): AsrSessionState {
   return {
-    text,
-    changed: normalizeAsrComparisonText(existing) !== normalizeAsrComparisonText(text),
+    sessionText: "",
+    committedPrefix: "",
+    lastEmittedText: "",
+    lastEmittedDefinite: false,
   };
+}
+
+export function resetAsrSessionState(state: AsrSessionState): void {
+  state.sessionText = "";
+  state.committedPrefix = "";
+  state.lastEmittedText = "";
+  state.lastEmittedDefinite = false;
+}
+
+/** Mark everything reported so far as spoken for, so later packets only yield new speech. */
+export function markAsrSessionCommitted(state: AsrSessionState): void {
+  state.committedPrefix = state.sessionText;
+  state.lastEmittedText = "";
+  state.lastEmittedDefinite = false;
+}
+
+function uncommittedAsrTail(sessionText: string, committedPrefix: string): string {
+  if (!committedPrefix) return sessionText;
+  if (sessionText === committedPrefix) return "";
+  if (sessionText.startsWith(committedPrefix)) {
+    return sessionText.slice(committedPrefix.length).trim();
+  }
+
+  // A verbatim prefix covers the normal cases: the provider only rewords a segment during the
+  // `enable_nonstream` second pass, which runs before the segment is reported as definite and
+  // therefore before it can be committed. When a commit does land mid-segment, that segment
+  // keeps growing from the same words. Anything else is treated as a revision and located
+  // fuzzily, falling back to the duplicate-turn guards downstream.
+  const tail = trimCrossTurnOverlap(committedPrefix, sessionText);
+  if (tail !== sessionText) return tail.trim();
+  return isAsrRollingRevision(committedPrefix, sessionText) ? "" : sessionText;
+}
+
+export function deriveAsrSessionUpdate(
+  state: AsrSessionState,
+  packet: AsrResultPacket,
+): AsrSessionUpdate {
+  const utterances = packet.utterances ?? [];
+
+  let joined = "";
+  // The newest segment carrying words is what says whether the speaker has stopped; earlier ones
+  // are settled history the provider keeps resending. Empty entries must be skipped rather than
+  // treated as the newest segment: the provider opens the next (still empty) utterance in the very
+  // packet that endpoints the previous one, so reading the literal last element reports
+  // `definite: false` for the rest of the session and the turn never commits.
+  let newestSpokenDefinite: boolean | null = null;
+  for (const utterance of utterances) {
+    const part = (utterance.text ?? "").trim();
+    if (!part) continue;
+    joined = joined ? joinAsrTail(joined, part) : part;
+    newestSpokenDefinite = !!utterance.definite;
+  }
+
+  const sessionText = (packet.text ?? "").trim() || joined;
+
+  const definite = newestSpokenDefinite ?? !!packet.isLastPackage;
+
+  if (!sessionText) {
+    return { text: state.lastEmittedText, definite, changed: false };
+  }
+
+  state.sessionText = sessionText;
+
+  const text = uncommittedAsrTail(sessionText, state.committedPrefix);
+  // Endpointing counts as news even when the wording is unchanged, but only while there is
+  // uncommitted speech for it to apply to.
+  const changed = !!text && (
+    normalizeAsrComparisonText(text) !== normalizeAsrComparisonText(state.lastEmittedText) ||
+    definite !== state.lastEmittedDefinite
+  );
+  state.lastEmittedText = text;
+  state.lastEmittedDefinite = definite;
+
+  return { text, definite, changed };
+}
+
+/**
+ * How long to keep a turn open before committing it, measured purely from when the transcript last
+ * grew: that gap is the only evidence that the speaker has stopped rather than paused.
+ *
+ * Note there is deliberately no turn-age input. Budgeting the window from the turn's first
+ * endpoint made tolerance shrink the longer someone talked, so a multi-part answer
+ * ("first… second… and third…") was committed on a one-second pause mid-list; the assistant
+ * started replying and the rest of the sentence arrived as a barge-in, splitting one answer across
+ * several turns. Someone three sentences in needs at least as much room to breathe as someone one
+ * sentence in. Total hold is bounded elsewhere, by the max-hold and session-rotation valves.
+ */
+export function asrPendingFinalDelayMs(input: {
+  coalesceTargetMs: number;
+  quietFloorMs: number;
+  quietElapsedMs: number;
+}): number {
+  const target = Math.max(input.coalesceTargetMs, input.quietFloorMs);
+  return Math.max(0, target - input.quietElapsedMs);
+}
+
+/**
+ * The scripted question a closing summary belongs to, or `null` when there is
+ * nothing left to summarize.
+ *
+ * Once the last question is finished the index deliberately sits one past the
+ * end while the wrap-up question ("anything else?") is answered, and that final
+ * question's summary has already been recorded. Indexing there yields
+ * `undefined`, so callers must not reach for `.text` unguarded.
+ */
+export function questionAwaitingSummary<T>(
+  questions: readonly T[],
+  currentQuestionIndex: number,
+  transcriptLength: number,
+): T | null {
+  if (transcriptLength <= 0) return null;
+  return questions[currentQuestionIndex] ?? null;
 }

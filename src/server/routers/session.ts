@@ -185,6 +185,8 @@ export const sessionRouter = router({
         .from("candidates")
         .select("*, interview:interviews(*, questions(*))")
         .eq("inviteToken", input.inviteToken)
+        // The first question is what a new session starts on, so the rows must not arrive unordered.
+        .order("order", { referencedTable: "interviews.questions", ascending: true })
         .single();
 
       if (!candidate) {

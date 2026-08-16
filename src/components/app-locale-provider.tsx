@@ -731,22 +731,18 @@ export function AppLocaleProvider({ children }: { children: React.ReactNode }) {
     const { locale: initial, isExplicit } = resolveInitialLocale();
     setLocaleState(initial);
 
-    if (!isExplicit) {
-      fetch("/api/locale")
-        .then((r) => r.json())
-        .then((data: { locale?: string; country?: string | null }) => {
-          // Keep the browser locale when the server has no real geo signal.
-          // The endpoint's no-country fallback is English and must not
-          // overwrite a Chinese browser preference.
-          if (
-            data.country &&
-            (data.locale === "zh" || data.locale === "en")
-          ) {
-            setLocaleState(data.locale);
-          }
-        })
-        .catch(() => {});
-    }
+    // The geo hint exists for visitors in China whose browser is configured in
+    // English. It can only promote to Chinese: its "en" answer means "no signal"
+    // rather than a preference, so someone browsing in Chinese from outside
+    // China must keep Chinese.
+    if (isExplicit || initial === "zh") return;
+
+    fetch("/api/locale")
+      .then((r) => r.json())
+      .then((data: { locale?: string }) => {
+        if (data.locale === "zh") setLocaleState("zh");
+      })
+      .catch(() => {});
   }, []);
 
   const value = useMemo<AppLocaleContextValue>(

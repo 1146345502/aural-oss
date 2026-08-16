@@ -2,24 +2,90 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+    activeSpeechHoldAction,
     collapseInternalAsrRepetitions,
+    countFollowUpsSpent,
     finalizeTurnBudgetResponse,
+    hasAnsweredCurrentQuestion,
     isAsrRollingRevision,
     isUserEndRequest,
     isUserSkipRequest,
     mergeAsrSegments,
-    mergePendingAsrInterim,
+    playbackAckFallbackMs,
+    questionAwaitingSummary,
     responseInvitesUserReply,
     shouldHoldBargeInInterimForFinal,
     shouldSuppressAnsweredAsrFinal,
     trimCrossTurnOverlap,
 } from "../server/voice-relay-helpers";
+import { maxFollowUpsForDepth } from "../src/lib/follow-up-depth";
+
+/** Replays a question the way the relay sees it: the announcement is untracked,
+ *  then user finals and the interviewer replies the participant heard in full. */
+function turnBudgetAfter(
+  depth: string,
+  transcript: Array<{ role: "user" | "assistant"; text: string }>,
+  userTurns: number,
+): number {
+  return (
+    maxFollowUpsForDepth(depth) -
+    countFollowUpsSpent({ transcript, userTurns })
+  );
+}
 
 test("explicit interview end requests are not treated as skip-to-next requests", () => {
   const text = "No, I cannot. So we end the interview now.";
 
   assert.equal(isUserEndRequest(text), true);
   assert.equal(isUserSkipRequest(text), false);
+});
+
+test("active speech rotates a stale ASR session instead of committing a partial utterance", () => {
+  assert.equal(
+    activeSpeechHoldAction({
+      micStillActive: true,
+      heldForMs: 60_000,
+      maxHoldMs: 60_000,
+    }),
+    "rotate",
+  );
+  assert.equal(
+    activeSpeechHoldAction({
+      micStillActive: false,
+      heldForMs: 60_000,
+      maxHoldMs: 60_000,
+    }),
+    "release",
+  );
+});
+
+test("ASR rotation recovery keeps a carried turn open through a brief activity gap", () => {
+  assert.equal(
+    activeSpeechHoldAction({
+      micStillActive: false,
+      heldForMs: 600,
+      maxHoldMs: 60_000,
+      rotationRecoveryActive: true,
+    }),
+    "hold",
+  );
+  assert.equal(
+    activeSpeechHoldAction({
+      micStillActive: false,
+      heldForMs: 3_000,
+      maxHoldMs: 60_000,
+      rotationRecoveryActive: false,
+    }),
+    "release",
+  );
+});
+
+test("legacy playback fallback excludes TTS time-to-first-byte", () => {
+  const sixteenSecondsOfPcm = 16 * 48_000;
+
+  assert.equal(playbackAckFallbackMs(sixteenSecondsOfPcm, 15_000), 2_000);
+  assert.equal(playbackAckFallbackMs(sixteenSecondsOfPcm, 0), 17_000);
+  assert.equal(playbackAckFallbackMs(0, 0), 1_500);
 });
 
 test("long answers mentioning 'interview' as a topic are not treated as end requests", () => {
@@ -140,6 +206,102 @@ test("turn budget finalizer leaves normal follow-ups untouched before limit", ()
       response: "能具体举一个例子吗？",
       changed: false,
     },
+  );
+});
+
+test("moderate depth runs out of follow-ups after the second one, not the seventh", () => {
+  const transcript: Array<{ role: "user" | "assistant"; text: string }> = [];
+
+  transcript.push({ role: "user", text: "Here is my answer to the first question." });
+  assert.equal(turnBudgetAfter("MODERATE", transcript, 1), 2);
+
+  transcript.push({ role: "assistant", text: "Can you give a concrete example?" });
+  transcript.push({ role: "user", text: "Sure, at my last company we..." });
+  assert.equal(turnBudgetAfter("MODERATE", transcript, 2), 1);
+
+  transcript.push({ role: "assistant", text: "How did you measure the impact?" });
+  transcript.push({ role: "user", text: "We tracked adoption weekly." });
+  assert.equal(turnBudgetAfter("MODERATE", transcript, 3), 0);
+});
+
+test("light depth allows no follow-ups and deep depth allows five", () => {
+  assert.equal(maxFollowUpsForDepth("LIGHT"), 0);
+  assert.equal(maxFollowUpsForDepth("DEEP"), 5);
+});
+
+test("research questions get more headroom but still rank by configured depth", () => {
+  assert.ok(
+    maxFollowUpsForDepth("MODERATE", "RESEARCH") > maxFollowUpsForDepth("MODERATE"),
+  );
+  assert.ok(
+    maxFollowUpsForDepth("MODERATE", "RESEARCH") <
+      maxFollowUpsForDepth("DEEP", "RESEARCH"),
+  );
+});
+
+test("unrecognized follow-up depths fall back to the column default", () => {
+  assert.equal(maxFollowUpsForDepth("medium"), maxFollowUpsForDepth("MODERATE"));
+  assert.equal(maxFollowUpsForDepth(undefined), maxFollowUpsForDepth("MODERATE"));
+});
+
+test("ASR finals split from one answer do not each burn a follow-up", () => {
+  // One spoken answer arriving as three finals, with the interviewer's replies
+  // to the first two cut short by the participant continuing to talk.
+  const transcript = [
+    { role: "user" as const, text: "So the main challenge was latency." },
+    { role: "user" as const, text: "Reliability." },
+    { role: "user" as const, text: "And graceful degradation when infra is down." },
+    { role: "assistant" as const, text: "How did you address the latency?" },
+  ];
+
+  assert.equal(countFollowUpsSpent({ transcript, userTurns: 3 }), 1);
+});
+
+test("a question still advances when every follow-up gets barged in on", () => {
+  const transcript = Array.from({ length: 8 }, () => ({ role: "user" as const }));
+
+  assert.ok(countFollowUpsSpent({ transcript, userTurns: 8 }) >= 2);
+});
+
+test("greetings and repeat requests do not count as answering the question", () => {
+  assert.equal(
+    hasAnsweredCurrentQuestion({
+      transcript: [{ role: "user", text: "Hi, can you hear me?" }],
+      userTurns: 1,
+      isZh: false,
+    }),
+    false,
+  );
+
+  assert.equal(
+    hasAnsweredCurrentQuestion({
+      transcript: [
+        { role: "user", text: "Hi, can you hear me?" },
+        { role: "assistant", text: "Yes, I can hear you clearly." },
+        {
+          role: "user",
+          text: "Great. I led the deployment team at my last company for about three years.",
+        },
+      ],
+      userTurns: 2,
+      isZh: false,
+    }),
+    true,
+  );
+});
+
+test("terse answers still let the interview move on after a couple of turns", () => {
+  assert.equal(
+    hasAnsweredCurrentQuestion({
+      transcript: [
+        { role: "user", text: "Not really." },
+        { role: "user", text: "No." },
+        { role: "user", text: "Nope." },
+      ],
+      userTurns: 3,
+      isZh: false,
+    }),
+    true,
   );
 });
 
@@ -309,6 +471,29 @@ test("answered ASR final does not suppress additive continuation after barge-in"
   );
 });
 
+test("short answered acknowledgement does not suppress a later full answer with the same prefix", () => {
+  const acknowledgement = "Yes.";
+  const fullAnswer =
+    "Yes. And so I think communication means communicating technical tradeoffs clearly to people.";
+
+  assert.equal(
+    shouldSuppressAnsweredAsrFinal(acknowledgement, fullAnswer),
+    false,
+  );
+  assert.equal(
+    isAsrRollingRevision(acknowledgement, fullAnswer),
+    true,
+    "A pending ASR hypothesis should still expand before the assistant has answered",
+  );
+});
+
+test("short answered acknowledgement still suppresses an exact replay", () => {
+  assert.equal(
+    shouldSuppressAnsweredAsrFinal("Yes.", "Yes."),
+    true,
+  );
+});
+
 test("barge-in interim is held for a final transcript instead of promoted immediately", () => {
   assert.equal(
     shouldHoldBargeInInterimForFinal({
@@ -341,12 +526,42 @@ test("barge-in interim is held for a final transcript instead of promoted immedi
   );
 });
 
-test("pending ASR interim merge reports unchanged duplicate hypotheses", () => {
-  const pending = "So let's focus on the first challenge, which is latency first. So in order to re";
+test("questionAwaitingSummary returns the question being answered mid-interview", () => {
+  const questions = [{ text: "Q1" }, { text: "Q2" }, { text: "Q3" }];
 
-  assert.deepEqual(
-    mergePendingAsrInterim(pending, pending),
-    { text: pending, changed: false },
+  assert.deepEqual(questionAwaitingSummary(questions, 0, 2), { text: "Q1" });
+  assert.deepEqual(questionAwaitingSummary(questions, 2, 4), { text: "Q3" });
+});
+
+test("questionAwaitingSummary has nothing to attribute once the wrap-up starts", () => {
+  const questions = [{ text: "Q1" }, { text: "Q2" }];
+
+  // After the last question the relay leaves the index one past the end while
+  // "anything else to add?" is answered, and Q2's summary is already recorded.
+  assert.equal(questionAwaitingSummary(questions, questions.length, 2), null);
+  assert.equal(questionAwaitingSummary(questions, 99, 2), null);
+});
+
+test("questionAwaitingSummary skips an empty transcript", () => {
+  assert.equal(questionAwaitingSummary([{ text: "Q1" }], 0, 0), null);
+});
+
+test("ending the interview from the wrap-up window has no question to summarize", () => {
+  // Regression: the participant answering "anything else to add?" with a phrase
+  // that reads as an end request used to throw on `currentQ.text`, which
+  // stranded the farewell and left the session stuck IN_PROGRESS.
+  const questions = [{ text: "Tell me about a tough customer." }];
+  const closing = "No, that's all from my side.";
+  assert.equal(isUserEndRequest(closing), true);
+
+  const wrapUpTranscript = [
+    { role: "assistant" as const, text: "Is there anything else you'd like to add?" },
+    { role: "user" as const, text: closing },
+  ];
+
+  assert.equal(
+    questionAwaitingSummary(questions, questions.length, wrapUpTranscript.length),
+    null,
   );
 });
 

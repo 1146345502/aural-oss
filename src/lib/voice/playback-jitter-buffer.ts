@@ -12,6 +12,26 @@ export interface PlaybackFlushDecision {
   sampleRate?: number;
 }
 
+export interface PlaybackCompletionDecision {
+  pendingSession: number;
+  currentSession: number;
+  activeSourceCount: number;
+  queuedSamples: number;
+}
+
+export function shouldAcknowledgePlayback({
+  pendingSession,
+  currentSession,
+  activeSourceCount,
+  queuedSamples,
+}: PlaybackCompletionDecision): boolean {
+  return (
+    pendingSession === currentSession &&
+    activeSourceCount === 0 &&
+    queuedSamples === 0
+  );
+}
+
 export function samplesToDurationMs(
   sampleCount: number,
   sampleRate = PLAYBACK_SAMPLE_RATE,

@@ -8,12 +8,15 @@ import { IntervieweeTourOverlay } from "@/components/session/interviewee-tour-ov
 import { IntervieweeTourProvider } from "@/components/session/interviewee-tour-provider";
 import { PreparingScreen } from "@/components/session/preparing-screen";
 import {
-  normalizeSessionEndReason,
-  SessionEndedScreen,
-  type SessionEndReason,
-  type SessionEndReasonInput,
+    normalizeSessionEndReason,
+    SessionEndedScreen,
+    type SessionEndReason,
+    type SessionEndReasonInput,
 } from "@/components/session/session-ended-screen";
 import type { InterviewContext } from "@/hooks/use-voice";
+import { DEFAULT_FOLLOW_UP_DEPTH } from "@/lib/follow-up-depth";
+import { REOPEN_SESSION_PARAM } from "@/lib/session-reopen";
+import { buildSessionResumeState } from "@/lib/session-resume";
 import { trpc } from "@/lib/trpc/client";
 import dynamic from "next/dynamic";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
@@ -39,13 +42,22 @@ export default function SlugSessionPage() {
 
   const isPreview = searchParams.get("preview") === "true";
   const previewQuestionId = searchParams.get("question");
+  /**
+   * Re-entry into a session already underway (from the owner's Sessions tab). The tour explains an
+   * interface they have already been using, so replaying it just stands between them and the
+   * session. Scoped to preview links so it cannot skip a real candidate's device checks.
+   */
+  const isReopened =
+    isPreview && searchParams.get(REOPEN_SESSION_PARAM) === "true";
 
   const [completed, setCompleted] = useState(false);
   const [completionReason, setCompletionReason] = useState<
     SessionEndReason | undefined
   >();
   const [onboardingDone, setOnboardingDone] = useState(isPreview);
-  const [previewTourDone, setPreviewTourDone] = useState(Boolean(previewQuestionId));
+  const [previewTourDone, setPreviewTourDone] = useState(
+    Boolean(previewQuestionId) || isReopened,
+  );
 
   const handleComplete = (reason?: SessionEndReasonInput) => {
     setCompletionReason(normalizeSessionEndReason(reason));
@@ -101,35 +113,12 @@ export default function SlugSessionPage() {
     );
   }
 
-  // Derive resume state
-  const resumeMessages = session.data.messages;
-  const resumeQuestionIndex = (() => {
-    const { currentQuestionId } = session.data;
-    if (currentQuestionId) {
-      const idx = interview.data.questions.findIndex((q: any) => q.id === currentQuestionId);
-      if (idx >= 0) return idx;
-    }
-    if (previewQuestionId) {
-      const idx = interview.data.questions.findIndex((q: any) => q.id === previewQuestionId);
-      if (idx >= 0) return idx;
-    }
-    return 0;
-  })();
-
-  const isResuming = resumeMessages && resumeMessages.length > 0;
-  const hasSessionQuestion = Boolean(session.data.currentQuestionId || previewQuestionId);
-
-  const resumeTextMessages = resumeMessages
-    ?.filter((m: any) => m.contentType === "TEXT")
-    .map((m: any) => ({ id: m.id, role: m.role, content: m.content }));
-
-  const resumeDrawings = resumeMessages
-    ?.filter((m: any) => m.contentType === "WHITEBOARD" && m.whiteboardData)
-    .map((m: any) => ({
-      id: m.content,
-      label: (m.whiteboardData as Record<string, unknown>)?.label as string ?? "Drawing",
-      snapshotData: JSON.stringify(m.whiteboardData),
-    }));
+  const resume = buildSessionResumeState({
+    messages: session.data.messages,
+    currentQuestionId: session.data.currentQuestionId,
+    fallbackQuestionId: previewQuestionId,
+    questions: interview.data.questions,
+  });
 
   const useVoice = interview.data.voiceEnabled;
 
@@ -144,7 +133,7 @@ export default function SlugSessionPage() {
       aiName: interview.data.aiName ?? "AI Interviewer",
       aiTone: "professional",
       language: interview.data.language ?? "en-US",
-      followUpDepth: "medium",
+      followUpDepth: interview.data.followUpDepth ?? DEFAULT_FOLLOW_UP_DEPTH,
       questions: interview.data.questions.map((q: any, i: number) => ({
         text: q.text,
         type: q.type as string,
@@ -201,7 +190,7 @@ export default function SlugSessionPage() {
       aiTone: interview.data.aiTone,
       language: interview.data.language,
       followUpDepth: interview.data.followUpDepth,
-      startQuestionIndex: hasSessionQuestion ? resumeQuestionIndex : undefined,
+      startQuestionIndex: resume.hasQuestion ? resume.questionIndex : undefined,
       questions: interview.data.questions.map((q: any) => ({
         text: q.text,
         type: q.type,
@@ -223,8 +212,8 @@ export default function SlugSessionPage() {
           questionCount={interview.data.questions.length}
           interviewContext={interviewContext}
           durationMinutes={interview.data.timeLimitMinutes ?? undefined}
-          initialMessages={isResuming ? resumeTextMessages : undefined}
-          initialDrawings={isResuming && resumeDrawings?.length ? resumeDrawings : undefined}
+          initialMessages={resume.isResuming ? resume.voiceMessages : undefined}
+          initialDrawings={resume.drawings.length ? resume.drawings : undefined}
           chatEnabled={!!interview.data.chatEnabled}
           onComplete={handleComplete}
           videoMode={isPreview ? false : !!interview.data.videoEnabled}
@@ -246,15 +235,8 @@ export default function SlugSessionPage() {
           })),
         }}
         durationMinutes={interview.data.timeLimitMinutes ?? undefined}
-        initialMessages={resumeMessages
-          ?.filter((m: any) => m.contentType !== "WHITEBOARD")
-          .map((m: any) => ({
-            id: m.id,
-            role: m.role as "USER" | "ASSISTANT" | "SYSTEM",
-            content: m.content,
-            timestamp: m.timestamp.toString(),
-          }))}
-        initialQuestionIndex={hasSessionQuestion ? resumeQuestionIndex : undefined}
+        initialMessages={resume.chatMessages}
+        initialQuestionIndex={resume.hasQuestion ? resume.questionIndex : undefined}
         onComplete={handleComplete}
       />
     </>

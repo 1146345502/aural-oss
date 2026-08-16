@@ -26,6 +26,7 @@ import {
     FolderKanban,
     Gauge,
     HelpCircle,
+    Languages,
     LayoutDashboard,
     LifeBuoy,
     Loader2,
@@ -81,6 +82,50 @@ function ThemeToggle() {
             )}
           >
             <opt.icon className="h-4 w-4" />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MenuLanguageToggle() {
+  const { locale, setLocale, t } = useAppLocale();
+
+  const options = [
+    { value: "en", label: t("common.english") },
+    { value: "zh", label: t("common.chinese") },
+  ] as const;
+
+  return (
+    <div className="flex items-center justify-between gap-2 px-2 py-1.5 text-sm">
+      <span className="flex items-center gap-2">
+        <Languages className="h-4 w-4" />
+        {t("common.language")}
+      </span>
+      <div
+        className="flex items-center rounded-md border bg-muted/40 p-0.5"
+        role="group"
+        aria-label={t("common.language")}
+      >
+        {options.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            aria-pressed={locale === option.value}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setLocale(option.value);
+            }}
+            className={cn(
+              "rounded px-2 py-1 text-[11px] font-medium leading-none transition-colors",
+              locale === option.value
+                ? "bg-primary text-primary-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {option.label}
           </button>
         ))}
       </div>
@@ -321,7 +366,7 @@ export function Sidebar({
       <SupportDrawer open={supportOpen} onOpenChange={setSupportOpen} />
 
       {/* User profile */}
-      <div className="border-t">
+      <div className="border-t p-2">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
@@ -375,6 +420,7 @@ export function Sidebar({
                 {t("sidebar.accountSettings")}
               </Link>
             </DropdownMenuItem>
+            <MenuLanguageToggle />
             <ThemeToggle />
             <DropdownMenuItem
               className="flex items-center gap-2 text-destructive"

@@ -10,19 +10,24 @@
 import { randomUUID } from "crypto";
 import { config } from "dotenv";
 import { WebSocket, WebSocketServer } from "ws";
+import { maxFollowUpsForDepth } from "../src/lib/follow-up-depth";
 import { createLogger } from "../src/lib/logger";
 import {
-    DEFAULT_TTS_BARGE_IN_MIN_AUDIO_BYTES,
-    DEFAULT_TTS_BARGE_IN_MIN_AUDIO_MS,
-    shouldAllowTtsBargeIn,
+  DEFAULT_TTS_BARGE_IN_MIN_AUDIO_BYTES,
+  DEFAULT_TTS_BARGE_IN_MIN_AUDIO_MS,
+  followUpDepthPromptCopy,
+  followUpLimitNotice,
+  followUpsSpentOnQuestion,
+  shouldAllowTtsBargeIn,
+  shouldSendFollowUpLimitNotice,
 } from "./openai-voice-relay-helpers";
 import {
-    type BigModelAsrConfig,
-    BIGMODEL_ASR_URL,
-    buildBigModelAudioRequest,
-    buildBigModelFullRequest,
-    buildBigModelHeaders,
-    parseAsrResponse,
+  type BigModelAsrConfig,
+  BIGMODEL_ASR_URL,
+  buildBigModelAudioRequest,
+  buildBigModelFullRequest,
+  buildBigModelHeaders,
+  parseAsrResponse,
 } from "./volcengine-asr";
 
 const log = createLogger("openai-relay");
@@ -249,13 +254,11 @@ function buildSystemPrompt(ctx: InterviewContext, startIdx: number): string {
   const isZh = isChineseInterview(ctx);
   const sorted = ctx.questions.sort((a, b) => a.order - b.order);
 
-  let maxFollowUps: number;
-  switch (ctx.followUpDepth) {
-    case "LIGHT":    maxFollowUps = 1; break;
-    case "MODERATE": maxFollowUps = 3; break;
-    case "DEEP":     maxFollowUps = 5; break;
-    default:         maxFollowUps = 2;
-  }
+  const maxFollowUps = maxFollowUpsForDepth(ctx.followUpDepth);
+  const { summary: depthSummary, rule: depthRule } = followUpDepthPromptCopy(
+    maxFollowUps,
+    isZh,
+  );
 
   const questionList = sorted.map((q, i) => {
     let entry = `  ${i + 1}. [${q.type}] ${q.text}`;
@@ -280,14 +283,14 @@ function buildSystemPrompt(ctx: InterviewContext, startIdx: number): string {
 ${ctx.objective ? `- 目标: ${ctx.objective}` : ""}
 - 问题数量: ${sorted.length}
 - 当前问题: 第${currentQ}个
-- 每题追问深度: 最多${maxFollowUps}次追问
+- 每题追问深度: ${depthSummary}
 
 ## 问题列表
 ${questionList}
 
 ## 你的行为准则
 1. 从第${currentQ}个问题开始。先用温暖友好的方式自我介绍（提到你的名字、面试主题和问题数量）。然后说一句过渡语，比如"我们开始吧，这是第一个问题。"之后再提出问题。问候、过渡语和问题必须是三个独立的句子，不要合并。
-2. 对每个问题，根据受访者的回答进行${maxFollowUps}次以内的追问。语气要像友好、耐心的真人面试官，而不是冷冰冰地连珠发问。
+2. ${depthRule}
 3. 当一个问题讨论充分后，调用 signal_question_change 函数来进入下一个问题。"讨论充分"是指受访者给出了详细、具体的回答——不是模糊的表述如"我遇到过很多挑战"。如果回答模糊，应追问以获取更多细节。
 4. 切换后，自然地过渡到新问题。通常先用一句简短的认可或感谢来承接上一段回答，再进入下一题，而不是直接生硬地抛出问题。
 5. 所有问题结束后，调用 signal_question_change 并设 questionIndex 为 ${sorted.length}（超出范围），然后做简短总结告别。
@@ -332,14 +335,14 @@ ${questionList}
 ${ctx.objective ? `- Objective: ${ctx.objective}` : ""}
 - Total questions: ${sorted.length}
 - Starting at: Question ${currentQ}
-- Follow-up depth: Up to ${maxFollowUps} follow-ups per question
+- Follow-up depth: ${depthSummary}
 
 ## Questions
 ${questionList}
 
 ## Your Behavior
 1. Start at question ${currentQ}. First, give a warm greeting — introduce yourself by name, mention the topic "${ctx.title}" and that there are ${sorted.length} questions. Then say a transition phrase like "Let's get started. Here is the first question." ONLY AFTER that, ask the question. The greeting, the transition phrase, and the question MUST be three separate sentences — NEVER combine them into one.
-2. For each question, follow up based on the participant's answers (up to ${maxFollowUps} follow-ups). Sound like a warm, patient human interviewer, not a rapid-fire questionnaire.
+2. ${depthRule}
 3. When a question is sufficiently discussed, call the signal_question_change function to move forward. "Sufficiently discussed" means the participant has given a detailed, specific answer — NOT a vague statement like "I had many challenges" or "that's a good question." If their answer is vague, ask them to elaborate before moving on.
 4. After transitioning, naturally introduce the next question. Usually start with a short acknowledgement or appreciation of the participant's last answer before asking the next question.
 5. After all questions are done, call signal_question_change with questionIndex=${sorted.length} (out of bounds), then give a brief wrap-up and farewell.
@@ -697,6 +700,11 @@ async function handleInterview(browserWs: WebSocket, ctx: InterviewContext) {
   const MIN_QUESTION_DWELL_MS = 15_000;
   const MIN_WORDS_BEFORE_TRANSITION = 20;
   let userCommittedWordsThisQuestion = 0;
+  const followUpBudget = maxFollowUpsForDepth(ctx.followUpDepth);
+  /** Assistant turns the participant actually heard on the current question.
+   *  The first one is the question itself, the rest are follow-ups. */
+  let assistantTurnsThisQuestion = 0;
+  let followUpLimitNoticeSent = false;
   // Keep the transition tool available at all times. Server-side guards
   // still decide whether a transition request is actually allowed.
   let toolsEnabled = true;
@@ -806,9 +814,45 @@ async function handleInterview(browserWs: WebSocket, ctx: InterviewContext) {
     // substantive answer, and those should still be able to transition.
   }
 
+  /**
+   * The Realtime model decides its own turns, so the configured follow-up depth
+   * can only be enforced by telling it when the budget is gone. Called once the
+   * participant has heard as many follow-ups as the interview allows.
+   */
+  function noteAssistantTurnAgainstFollowUpBudget() {
+    assistantTurnsThisQuestion++;
+    if (!oaiWs || oaiWs.readyState !== WebSocket.OPEN) return;
+    if (
+      !shouldSendFollowUpLimitNotice({
+        assistantTurnsThisQuestion,
+        followUpBudget,
+        noticeAlreadySent: followUpLimitNoticeSent,
+        interviewDone,
+      })
+    ) {
+      return;
+    }
+
+    followUpLimitNoticeSent = true;
+    const qNum = currentQuestionIndex + 1;
+
+    oaiWs.send(JSON.stringify({
+      type: "conversation.item.create",
+      item: {
+        type: "message",
+        role: "system",
+        content: [
+          { type: "input_text", text: followUpLimitNotice(qNum, followUpBudget, isZh) },
+        ],
+      },
+    }));
+    const spent = followUpsSpentOnQuestion(assistantTurnsThisQuestion);
+    log.info(`Follow-up budget spent on Q${qNum} (${spent}/${followUpBudget}) — instructed model to move on`);
+  }
+
   let pendingTransitionTimer: ReturnType<typeof setTimeout> | null = null;
 
-  log.info(`Interview: "${ctx.title}" (${sortedQuestions.length} questions, lang=${ctx.language}, startQ=${currentQuestionIndex})`);
+  log.info(`Interview: "${ctx.title}" (${sortedQuestions.length} questions, lang=${ctx.language}, startQ=${currentQuestionIndex}, followUpDepth=${ctx.followUpDepth})`);
 
   function send(msg: Record<string, unknown>) {
     if (browserWs.readyState === WebSocket.OPEN)
@@ -1598,6 +1642,8 @@ async function handleInterview(browserWs: WebSocket, ctx: InterviewContext) {
                 currentQuestionIndex = newIdx;
                 questionEnteredAt = Date.now();
                 userCommittedWordsThisQuestion = 0;
+                assistantTurnsThisQuestion = 0;
+                followUpLimitNoticeSent = false;
                 disableTools();
                 send({
                   type: "question_change",
@@ -1671,6 +1717,7 @@ async function handleInterview(browserWs: WebSocket, ctx: InterviewContext) {
               if (capturedModelText) {
                 log.info(`TTS done (${responseTtsBytes}B sent): ${JSON.stringify(capturedModelText)}`);
                 pushHistory("assistant", capturedModelText);
+                noteAssistantTurnAgainstFollowUpBudget();
               }
               send({ type: "tts_ended" });
             } else if (hadTts) {

@@ -44,6 +44,7 @@ import {
 } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { exportToXlsx } from "@/lib/export-xlsx";
+import { buildReopenSessionUrl, canReopenSession } from "@/lib/session-reopen";
 import { getSessionOverallScore } from "@/lib/session-score";
 import { trpc } from "@/lib/trpc/client";
 import {
@@ -63,6 +64,7 @@ import {
     GripVertical,
     Link as LinkIcon,
     Loader2,
+    PlayCircle,
     Plus,
     Search,
     Settings,
@@ -403,6 +405,7 @@ function SortableHead({
 
 export function CandidateManager({
   interviewId,
+  interview,
   onViewSession,
 }: CandidateManagerProps) {
   const { toast } = useToast();
@@ -546,6 +549,19 @@ export function CandidateManager({
       toast({ title: "Invite link copied!" });
     },
     [toast],
+  );
+
+  const handleReopenSession = useCallback(
+    (sessionId: string) => {
+      window.open(
+        buildReopenSessionUrl({
+          publicSlug: interview.publicSlug,
+          sessionId,
+        }),
+        "_blank",
+      );
+    },
+    [interview.publicSlug],
   );
 
   // ── Build unified rows ──
@@ -1093,6 +1109,16 @@ export function CandidateManager({
                     const hasSession = !!session && status !== "Not Started";
                     const compositeId = `${row.type}-${row.id}`;
                     const c = getCandidateField(row);
+                    // Invited rows are deliberately excluded: their re-entry link is the invite link
+                    // already offered below, and it belongs to the candidate rather than the owner.
+                    const showReopen =
+                      hasSession &&
+                      row.type === "walkin" &&
+                      canReopenSession({
+                        status,
+                        publicSlug: interview.publicSlug,
+                        isActive: interview.isActive,
+                      });
 
                     const cellValues: Record<
                       string,
@@ -1273,6 +1299,16 @@ export function CandidateManager({
                               onClick={() => onViewSession(session.id)}
                             >
                               <ClipboardList className="h-3.5 w-3.5 text-muted-foreground" />
+                            </Button>
+                          ) : showReopen ? (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7"
+                              title="Reopen session"
+                              onClick={() => handleReopenSession(session.id)}
+                            >
+                              <PlayCircle className="h-3.5 w-3.5 text-muted-foreground" />
                             </Button>
                           ) : row.type === "candidate" && row.inviteToken ? (
                             <Button

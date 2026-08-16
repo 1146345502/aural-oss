@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 
 const relayPath = path.join(
   fileURLToPath(new URL("../server/voice-relay.ts", import.meta.url)),
@@ -33,9 +33,10 @@ describe("server/voice-relay.ts reconnect & lifecycle (source checks)", () => {
     );
     assert.equal(
       keepAliveIntervals?.length,
-      4,
-      "mic test, response-cycle reopen, post-reconnect, and main interview keep-alive intervals",
+      3,
+      "response-cycle reopen, post-reconnect, and main interview keep-alive intervals",
     );
+    assert.match(src, /MIC_TEST_ASR_IDLE_KEEPALIVE_MS/);
   });
 
   it("marks interviews done and detaches ASR listeners when the browser closes", () => {

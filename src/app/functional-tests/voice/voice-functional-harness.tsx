@@ -16,11 +16,22 @@ type FunctionalScenarioId =
   | "chinese-failover"
   | "farewell-complete"
   | "thinking-after-asr"
-  | "thinking-until-response";
+  | "thinking-until-response"
+  | "asr-cancelled"
+  | "long-transcript-layout";
+
+const LONG_FUNCTIONAL_TRANSCRIPT = Array.from(
+  { length: 320 },
+  (_, index) => `project-detail-${index + 1}`,
+).join(" ");
 
 declare global {
   interface Window {
     __functionalRelayConnections?: Array<{ url: string; path: string }>;
+    __functionalRelayMessages?: Array<{
+      path: string;
+      message: Record<string, unknown>;
+    }>;
     __functionalRelayScenario?: FunctionalScenario;
     __functionalRelayMockInstalled?: boolean;
   }
@@ -62,10 +73,18 @@ const functionalScenarios: Record<FunctionalScenarioId, FunctionalScenario> = {
             type: "tts_text",
             data: {
               text: "Understood, we're all set. Thanks for your time today and take care.",
+              utteranceId: "functional-farewell-1",
             },
           },
         },
-        { type: "json", delay: 180, message: { type: "tts_ended" } },
+        {
+          type: "json",
+          delay: 180,
+          message: {
+            type: "tts_ended",
+            utteranceId: "functional-farewell-1",
+          },
+        },
         { type: "json", delay: 200, message: { type: "interview_complete" } },
       ],
     },
@@ -142,6 +161,53 @@ const functionalScenarios: Record<FunctionalScenarioId, FunctionalScenario> = {
       events: [{ type: "close", delay: 30 }],
     },
   },
+  "asr-cancelled": {
+    "/ws/voice": {
+      events: [
+        { type: "ready", delay: 20 },
+        {
+          type: "json",
+          delay: 5_000,
+          message: {
+            type: "asr_pending",
+            text: "Yes. And so I think communication is critical.",
+            delayMs: 50,
+          },
+        },
+        {
+          type: "json",
+          delay: 5_800,
+          message: {
+            type: "asr_cancelled",
+            reason: "duplicate",
+          },
+        },
+      ],
+    },
+    "/ws/openai-voice": {
+      events: [{ type: "close", delay: 30 }],
+    },
+  },
+  "long-transcript-layout": {
+    "/ws/voice": {
+      events: [
+        { type: "ready", delay: 20 },
+        {
+          type: "json",
+          // Let the interface finish its async recording/session startup, which
+          // clears any transcript delivered before the microphone is ready.
+          delay: 5_000,
+          message: {
+            type: "asr_ended",
+            text: LONG_FUNCTIONAL_TRANSCRIPT,
+          },
+        },
+      ],
+    },
+    "/ws/openai-voice": {
+      events: [{ type: "close", delay: 30 }],
+    },
+  },
 };
 
 function installFunctionalRelayMocks(scenario: FunctionalScenario) {
@@ -149,8 +215,10 @@ function installFunctionalRelayMocks(scenario: FunctionalScenario) {
   const relayPaths = new Set(["/ws/voice", "/ws/openai-voice"]);
 
   window.__functionalRelayConnections = [];
+  window.__functionalRelayMessages = [];
   window.__functionalRelayScenario = scenario;
   window.sessionStorage.setItem("__functionalRelayConnections", "[]");
+  window.sessionStorage.setItem("__functionalRelayMessages", "[]");
 
   if (!navigator.mediaDevices) {
     Object.defineProperty(navigator, "mediaDevices", {
@@ -207,6 +275,18 @@ function installFunctionalRelayMocks(scenario: FunctionalScenario) {
         parsed = JSON.parse(data) as Record<string, unknown>;
       } catch {
         parsed = null;
+      }
+
+      if (parsed) {
+        const nextMessages = [
+          ...(window.__functionalRelayMessages ?? []),
+          { path: this.path, message: parsed },
+        ];
+        window.__functionalRelayMessages = nextMessages;
+        window.sessionStorage.setItem(
+          "__functionalRelayMessages",
+          JSON.stringify(nextMessages),
+        );
       }
 
       if (parsed?.type === "init" && !this.scheduled) {
@@ -309,7 +389,7 @@ export function VoiceFunctionalHarness({
           aiName: "TestInterviewer",
           aiTone: "Professional",
           language,
-          followUpDepth: "Moderate",
+          followUpDepth: "MODERATE",
           questions: [
             {
               text: "Tell me about a project you are proud of.",

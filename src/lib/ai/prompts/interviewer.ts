@@ -1,3 +1,4 @@
+import { maxFollowUpsForDepth } from "@/lib/follow-up-depth";
 import type { Tables } from "@/lib/supabase/types";
 import type { LLMMessage } from "../types";
 
@@ -29,6 +30,12 @@ export function buildInterviewerPrompt(ctx: InterviewContext): LLMMessage[] {
     interview.videoEnabled && "Video",
   ].filter(Boolean).join(", ");
 
+  const maxFollowUps = maxFollowUpsForDepth(interview.followUpDepth);
+  const maxResearchFollowUps = maxFollowUpsForDepth(
+    interview.followUpDepth,
+    "RESEARCH",
+  );
+
   const systemPrompt = `You are ${interview.aiName}, an expert interviewer conducting a structured conversation.
 
 INTERVIEW CONTEXT:
@@ -46,17 +53,18 @@ YOUR ROLE:
 5. Never ask multiple questions at once
 6. Keep track of what has been discussed to avoid repetition
 
-FOLLOW-UP STRATEGY (${interview.followUpDepth} depth):
-${interview.followUpDepth === "LIGHT" ? "- Only ask scripted questions, no follow-ups" : ""}
-${interview.followUpDepth === "MODERATE" ? "- Ask 1-2 follow-ups per question when the response is vague or short\n- Move on after getting a reasonable answer" : ""}
-${interview.followUpDepth === "DEEP" ? "- Probe deeply until you feel the topic is fully explored\n- Ask clarifying and depth questions\n- Explore emotional significance and personal experiences" : ""}
+FOLLOW-UP STRATEGY (${interview.followUpDepth} depth — a HARD LIMIT of ${maxFollowUps} follow-up${maxFollowUps === 1 ? "" : "s"} per scripted question):
+${maxFollowUps === 0
+    ? "- Ask only the scripted questions. Once the participant has answered, move on\n- Probe only if their answer was unintelligible or clearly about a different topic"
+    : `- Ask at most ${maxFollowUps} follow-up${maxFollowUps === 1 ? "" : "s"} per scripted question, and only when the response is vague, short, or leaves a key thread unexplored\n- Move on as soon as you have a reasonable answer — you do not have to spend the full budget\n- Once you have asked ${maxFollowUps} follow-up${maxFollowUps === 1 ? "" : "s"} on a question, you MUST move to the next scripted question even if the topic feels unfinished`}
+- Answering a question the participant asks you, or repeating the question for them, does not count against this budget
 
 CONVERSATION FLOW:
 1. If this is the start, introduce yourself warmly and explain the interview purpose
 2. Ask the current question from the script
 3. After each response:
    - Acknowledge what they shared (1 sentence)
-   - If follow-up depth allows, ask 1 probing question OR move to next script question
+   - If the follow-up budget for this question still has room, ask 1 probing question; otherwise move to the next script question
 4. After all script questions, ask: "Is there anything else you'd like to add?"
 5. Thank them sincerely and signal the interview is complete
 
@@ -98,7 +106,7 @@ RESEARCH QUESTIONS:
 - Probe deeply into every angle: ask about specifics, examples, timelines, causes, effects, alternatives, and implications
 - When the participant gives a surface-level answer, dig deeper with "why", "how", "can you elaborate", "what specifically"
 - Explore adjacent topics and connections the participant mentions
-- Override the normal follow-up limit — continue probing until the topic is truly exhausted
+- RESEARCH questions get a larger budget than the rest: up to ${maxResearchFollowUps} follow-ups instead of ${maxFollowUps}. That is still a hard limit — move on once you reach it
 - Summarize what you've learned so far and ask if there's anything they'd like to add before moving on
 
 RULES:

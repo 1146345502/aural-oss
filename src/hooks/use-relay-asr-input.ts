@@ -6,6 +6,12 @@ import {
     mergeClientAsrInterim,
 } from "@/lib/voice/asr-interim";
 import {
+    bufferMicAudioChunk,
+    createMicFrameChunker,
+    encodeMicAudioChunk,
+    MIC_AUDIO_CHUNK_SAMPLES,
+} from "@/lib/voice/mic-audio";
+import {
     buildRelayTargets,
     RelayConnector,
     resolveRelayPrimaryPreference,
@@ -90,11 +96,7 @@ export function useRelayAsrInput({
     (hex: string) => {
       const connector = connectorRef.current;
       if (!connector?.isReady) {
-        pendingAudioRef.current.push(hex);
-        const maxBufferedChunks = 80;
-        if (pendingAudioRef.current.length > maxBufferedChunks) {
-          pendingAudioRef.current.shift();
-        }
+        bufferMicAudioChunk(pendingAudioRef.current, hex);
         return;
       }
       flushPendingAudio();
@@ -127,13 +129,13 @@ export function useRelayAsrInput({
 
       const workletCode = `
         class MicProcessor extends AudioWorkletProcessor {
-          constructor() { super(); this._buf = new Float32Array(4096); this._pos = 0; }
+          constructor() { super(); this._buf = new Float32Array(${MIC_AUDIO_CHUNK_SAMPLES}); this._pos = 0; }
           process(inputs) {
             const ch = inputs[0]?.[0];
             if (!ch) return true;
             for (let i = 0; i < ch.length; i++) {
               this._buf[this._pos++] = ch[i];
-              if (this._pos >= 4096) { this.port.postMessage(this._buf); this._buf = new Float32Array(4096); this._pos = 0; }
+              if (this._pos >= ${MIC_AUDIO_CHUNK_SAMPLES}) { this.port.postMessage(this._buf); this._buf = new Float32Array(${MIC_AUDIO_CHUNK_SAMPLES}); this._pos = 0; }
             }
             return true;
           }
@@ -155,6 +157,10 @@ export function useRelayAsrInput({
       silentGain.connect(ctx.destination);
       micCaptureStartedRef.current = true;
 
+      // Meter on the small capture chunks so the waveform stays smooth, but batch them into
+      // the wider frames the provider expects on the wire.
+      const toUplinkFrames = createMicFrameChunker();
+
       worklet.port.onmessage = (e) => {
         if (!listeningRef.current) return;
         const input = e.data as Float32Array;
@@ -163,16 +169,7 @@ export function useRelayAsrInput({
         const rms = Math.sqrt(sumSq / input.length);
         onAudioLevelRef.current?.(micLevelForDisplay(rms));
 
-        const pcm = new Int16Array(input.length);
-        for (let i = 0; i < input.length; i++) {
-          pcm[i] = Math.max(-32768, Math.min(32767, input[i] * 32768));
-        }
-        const bytes = new Uint8Array(pcm.buffer);
-        let hex = "";
-        for (let i = 0; i < bytes.length; i++) {
-          hex += bytes[i].toString(16).padStart(2, "0");
-        }
-        sendAudioHex(hex);
+        toUplinkFrames(input, (frame) => sendAudioHex(encodeMicAudioChunk(frame)));
       };
     } catch {
       stop();

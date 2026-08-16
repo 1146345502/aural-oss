@@ -6,6 +6,7 @@ import {
   JITTER_BUFFER_TARGET_MS,
   PLAYBACK_SAMPLE_RATE,
   samplesToDurationMs,
+  shouldAcknowledgePlayback,
   shouldFlushPlaybackQueue,
 } from "@/lib/voice/playback-jitter-buffer";
 
@@ -50,5 +51,35 @@ test("playback queue flushes after the max wait even if the target buffer was no
       nowMs: 1000 + JITTER_BUFFER_MAX_WAIT_MS + 5,
     }),
     true,
+  );
+});
+
+test("playback is acknowledged only after the matching utterance queue drains", () => {
+  assert.equal(
+    shouldAcknowledgePlayback({
+      pendingSession: 3,
+      currentSession: 3,
+      activeSourceCount: 0,
+      queuedSamples: 0,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldAcknowledgePlayback({
+      pendingSession: 3,
+      currentSession: 3,
+      activeSourceCount: 1,
+      queuedSamples: 0,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldAcknowledgePlayback({
+      pendingSession: 3,
+      currentSession: 4,
+      activeSourceCount: 0,
+      queuedSamples: 0,
+    }),
+    false,
   );
 });

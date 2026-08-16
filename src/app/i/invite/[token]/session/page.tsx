@@ -6,11 +6,12 @@ import { AntiCheatingGuard } from "@/components/session/anti-cheating-banner";
 import { IntervieweeOnboarding } from "@/components/session/interviewee-onboarding";
 import { PreparingScreen } from "@/components/session/preparing-screen";
 import {
-  normalizeSessionEndReason,
-  SessionEndedScreen,
-  type SessionEndReason,
-  type SessionEndReasonInput,
+    normalizeSessionEndReason,
+    SessionEndedScreen,
+    type SessionEndReason,
+    type SessionEndReasonInput,
 } from "@/components/session/session-ended-screen";
+import { buildSessionResumeState } from "@/lib/session-resume";
 import { trpc } from "@/lib/trpc/client";
 import dynamic from "next/dynamic";
 import { useParams, useRouter } from "next/navigation";
@@ -91,6 +92,14 @@ export default function InviteSessionPage() {
     );
   }
 
+  // Candidates can close the tab and come back through their invite link, which reuses this same
+  // session, so hand back what they already recorded rather than restarting the interview.
+  const resume = buildSessionResumeState({
+    messages: session.messages,
+    currentQuestionId: session.currentQuestionId,
+    questions: interview.questions,
+  });
+
   const useVoice = interview.voiceEnabled;
 
   if (useVoice) {
@@ -101,6 +110,7 @@ export default function InviteSessionPage() {
       aiTone: interview.aiTone,
       language: interview.language,
       followUpDepth: interview.followUpDepth,
+      startQuestionIndex: resume.hasQuestion ? resume.questionIndex : undefined,
       questions: interview.questions.map((q: any) => ({
         text: q.text,
         type: q.type,
@@ -122,6 +132,8 @@ export default function InviteSessionPage() {
           questionCount={interview.questions.length}
           interviewContext={interviewContext}
           durationMinutes={interview.timeLimitMinutes ?? undefined}
+          initialMessages={resume.isResuming ? resume.voiceMessages : undefined}
+          initialDrawings={resume.drawings.length ? resume.drawings : undefined}
           chatEnabled={!!interview.chatEnabled}
           onComplete={handleComplete}
           videoMode={!!interview.videoEnabled}
@@ -143,6 +155,8 @@ export default function InviteSessionPage() {
           })),
         }}
         durationMinutes={interview.timeLimitMinutes ?? undefined}
+        initialMessages={resume.chatMessages}
+        initialQuestionIndex={resume.hasQuestion ? resume.questionIndex : undefined}
         onComplete={handleComplete}
       />
     </>

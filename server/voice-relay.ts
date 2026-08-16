@@ -21,16 +21,27 @@
 import { randomUUID } from "crypto";
 import { config } from "dotenv";
 import { WebSocket, WebSocketServer } from "ws";
+import { maxFollowUpsForDepth } from "../src/lib/follow-up-depth";
 import { bt } from "../src/lib/i18n";
 import { createLogger } from "../src/lib/logger";
 import { callRelayLLM, logRelayLlmStartup } from "./relay-llm";
 import {
+    activeSpeechHoldAction,
+    asrPendingFinalDelayMs,
     collapseInternalAsrRepetitions,
+    countFollowUpsSpent,
+    createAsrSessionState,
+    deriveAsrSessionUpdate,
     finalizeTurnBudgetResponse,
+    hasAnsweredCurrentQuestion,
+    isAsrRollingRevision,
     isUserEndRequest,
     isUserSkipRequest,
+    markAsrSessionCommitted,
     mergeAsrSegments,
-    mergePendingAsrInterim,
+    playbackAckFallbackMs,
+    questionAwaitingSummary,
+    resetAsrSessionState,
     responseInvitesUserReply,
     shouldHoldBargeInInterimForFinal,
     shouldSuppressAnsweredAsrFinal,
@@ -75,14 +86,20 @@ const RELAY_PORT = Number(process.env.VOICE_RELAY_PORT) || 8766;
 // ASR config — X-Api-Key auth (new console) for ASR 2.0
 const ASR_APP_ID = process.env.DOUBAO_APP_ID || process.env.DOUBAO_APP_KEY || "";
 const ASR_ACCESS_TOKEN = process.env.DOUBAO_ACCESS_TOKEN || "";
+/** BigModel streaming ASR only accepts X-Api-Key auth; App ID + Access Token returns HTTP 400. */
 const ASR_API_KEY = process.env.DOUBAO_API_KEY || "";
 const ASR_RESOURCE_ID = process.env.DOUBAO_ASR_RESOURCE_ID || "volc.seedasr.sauc.duration";
 
 /** Volc BigModel endpointing / speech timing bounds (ms). Docs: min 200ms for end window. */
 const ASR_ENDPOINT_MIN_MS = 200;
-const ASR_END_WINDOW_DEFAULT_MS = 2000;
+/**
+ * Silence before the provider endpoints a segment, at the docs' recommended default. Endpointing
+ * early is cheap now that a resumed segment merges back into the same turn, and it is the largest
+ * single contributor to turn-taking latency. Override: DOUBAO_ASR_END_WINDOW_MS.
+ */
+const ASR_END_WINDOW_DEFAULT_MS = 800;
 const ASR_END_WINDOW_MAX_MS = 6_000;
-const ASR_FORCE_SPEECH_DEFAULT_MS = 0;
+const ASR_FORCE_SPEECH_DEFAULT_MS = 1000;
 const ASR_FORCE_SPEECH_MAX_MS = 60_000;
 
 /**
@@ -97,47 +114,75 @@ const ASR_END_WINDOW_MS = Math.max(
   ),
 );
 /**
- * Volc BigModel force_to_speech_time can force a definite result while speech is still ongoing.
- * Keep it disabled by default so candidate answers are ended by silence (end_window_size), not by
- * an arbitrary wall-clock chunk. Override with DOUBAO_ASR_FORCE_SPEECH_MS if a forced cap is needed.
+ * Volc BigModel force_to_speech_time (ms) is a floor, not a cap: a segment shorter than this is
+ * never endpointed, so it stops half-second blips from becoming their own turns. Docs recommend
+ * 1000 and require at least 1. Override: DOUBAO_ASR_FORCE_SPEECH_MS
  */
 const parsedForceSpeechMs = Number(process.env.DOUBAO_ASR_FORCE_SPEECH_MS);
 const ASR_FORCE_SPEECH_MS = Number.isFinite(parsedForceSpeechMs)
   ? Math.max(0, Math.min(ASR_FORCE_SPEECH_MAX_MS, parsedForceSpeechMs))
   : ASR_FORCE_SPEECH_DEFAULT_MS;
+const MIC_TEST_ASR_END_WINDOW_MS = Math.min(800, ASR_END_WINDOW_MS);
+const MIC_TEST_ASR_IDLE_KEEPALIVE_MS = 1_000;
+/** Roughly 10s of 200ms uplink frames held while ASR is still becoming ready. */
+const ASR_MAX_PENDING_CHUNKS = 50;
+/**
+ * Hold after a definite segment before committing the turn, so a short pause mid-answer can still
+ * merge into the same utterance. Authoritative session reassembly means a resumed segment rejoins
+ * the turn intact, so this only needs to cover the gap where someone draws breath mid-sentence.
+ */
 const ASR_FINAL_COALESCE_MS = Math.max(
   0,
   Math.min(
     5_000,
-    Number(process.env.DOUBAO_ASR_FINAL_COALESCE_MS) || 2_200,
+    Number(process.env.DOUBAO_ASR_FINAL_COALESCE_MS) || 1_500,
   ),
 );
+/**
+ * Long answers get a wider window than the normal path: people draw breath and think mid-sentence
+ * more often the longer they talk, and committing during one of those pauses cuts the answer in
+ * half. With end_window_size this tolerates a ~3.8s pause before the turn is handed to the LLM.
+ */
 const ASR_LONG_FINAL_COALESCE_MS = Math.max(
   ASR_FINAL_COALESCE_MS,
   Math.min(
     8_000,
-    Number(process.env.DOUBAO_ASR_LONG_FINAL_COALESCE_MS) || 5_000,
+    Number(process.env.DOUBAO_ASR_LONG_FINAL_COALESCE_MS) || 3_000,
   ),
 );
 const ASR_SHORT_FINAL_COALESCE_MS = Math.max(
   0,
   Math.min(
     ASR_FINAL_COALESCE_MS,
-    Number(process.env.DOUBAO_ASR_SHORT_FINAL_COALESCE_MS) || 500,
+    Number(process.env.DOUBAO_ASR_SHORT_FINAL_COALESCE_MS) || 300,
   ),
 );
 const ASR_ACTIVE_SPEECH_HOLD_MS = Math.max(
   0,
   Math.min(
     3_000,
-    Number(process.env.DOUBAO_ASR_ACTIVE_SPEECH_HOLD_MS) || 1_200,
+    Number(process.env.DOUBAO_ASR_ACTIVE_SPEECH_HOLD_MS) || 600,
   ),
 );
 const ASR_PENDING_FINAL_QUIET_MS = Math.max(
   ASR_ACTIVE_SPEECH_HOLD_MS,
   Math.min(
     4_000,
-    Number(process.env.DOUBAO_ASR_PENDING_FINAL_QUIET_MS) || 1_600,
+    Number(process.env.DOUBAO_ASR_PENDING_FINAL_QUIET_MS) || 800,
+  ),
+);
+/**
+ * Backstop for the failure mode where the provider never reports `definite` at all: how long an
+ * interim may sit unchanged, with a quiet microphone, before the relay endpoints the turn itself.
+ * Deliberately several times end_window_size — normal endpointing arrives ~800ms after speech
+ * stops, so this should only ever fire when that is broken. Tightening it turns the backstop into
+ * a competing endpointer that splits answers at ordinary mid-sentence pauses.
+ */
+const ASR_INTERIM_STALL_COMMIT_MS = Math.max(
+  0,
+  Math.min(
+    20_000,
+    Number(process.env.DOUBAO_ASR_INTERIM_STALL_COMMIT_MS) || 4_000,
   ),
 );
 const ASR_MAX_ACTIVE_SPEECH_HOLD_MS = Math.max(
@@ -209,8 +254,12 @@ function getTtsOptions(language?: string): TtsSynthesisOptions {
   };
 }
 
-if (!ASR_ACCESS_TOKEN && !ASR_API_KEY) {
-  log.error("Missing DOUBAO_ACCESS_TOKEN or DOUBAO_API_KEY in .env.local");
+if (!ASR_API_KEY) {
+  log.error("Missing DOUBAO_API_KEY in .env.local (required for BigModel streaming ASR)");
+  process.exit(1);
+}
+if (!TTS_APP_ID || !TTS_ACCESS_TOKEN) {
+  log.error("Missing DOUBAO_APP_ID or DOUBAO_ACCESS_TOKEN in .env.local (required for TTS)");
   process.exit(1);
 }
 
@@ -720,11 +769,11 @@ async function summarizeQuestion(
 // ── Relay server ────────────────────────────────────────────────────
 
 const wss = new WebSocketServer({ port: RELAY_PORT });
-log.info(`ASR: resource=${ASR_RESOURCE_ID}, auth=${ASR_API_KEY ? `X-Api-Key(${ASR_API_KEY.slice(0, 8)}...)` : "AppKey+AccessKey"}`);
+log.info(`ASR: resource=${ASR_RESOURCE_ID}, auth=X-Api-Key(${ASR_API_KEY.slice(0, 8)}...)`);
 log.info(`ASR VAD: end_window_size=${ASR_END_WINDOW_MS}ms, force_to_speech=${ASR_FORCE_SPEECH_MS}ms`);
-log.info(`ASR final coalescing: normal=${ASR_FINAL_COALESCE_MS}ms, long=${ASR_LONG_FINAL_COALESCE_MS}ms, quiet=${ASR_PENDING_FINAL_QUIET_MS}ms, active_speech_hold=${ASR_ACTIVE_SPEECH_HOLD_MS}ms, max_active_hold=${ASR_MAX_ACTIVE_SPEECH_HOLD_MS}ms, session_max_speech=${ASR_SESSION_MAX_CONTINUOUS_SPEECH_MS}ms, stuck_rotate=${ASR_STUCK_TEXT_ROTATE_MS}ms`);
+log.info(`ASR final coalescing: normal=${ASR_FINAL_COALESCE_MS}ms, long=${ASR_LONG_FINAL_COALESCE_MS}ms, quiet=${ASR_PENDING_FINAL_QUIET_MS}ms, active_speech_hold=${ASR_ACTIVE_SPEECH_HOLD_MS}ms, max_active_hold=${ASR_MAX_ACTIVE_SPEECH_HOLD_MS}ms, session_max_speech=${ASR_SESSION_MAX_CONTINUOUS_SPEECH_MS}ms, stuck_rotate=${ASR_STUCK_TEXT_ROTATE_MS}ms, interim_stall_commit=${ASR_INTERIM_STALL_COMMIT_MS}ms`);
 const ttsAuthResolved = getTtsAuth();
-log.info(`TTS: resource=${ttsAuthResolved.resourceId}, auth=${ttsAuthResolved.apiKey ? `X-Api-Key(${ttsAuthResolved.apiKey.slice(0, 8)}...)` : "AppId+AccessKey"}`);
+log.info(`TTS: resource=${ttsAuthResolved.resourceId}, auth=AppId+AccessKey(${ttsAuthResolved.appId})`);
 if (VISION_LLM_API_KEY) {
   log.info(
     `Vision LLM: ${VISION_LLM_MODEL}${VISION_LLM_RETRY_MODEL !== VISION_LLM_MODEL ? ` (retry: ${VISION_LLM_RETRY_MODEL})` : ""}, max_tokens=${VISION_LLM_MAX_TOKENS}`,
@@ -769,9 +818,11 @@ async function handleMicTestConnection(browserWs: WebSocket) {
   let asrAlive = false;
   let asrAudioSeq = 1;
   let keepAliveInterval: ReturnType<typeof setInterval> | null = null;
-  let asrAccumulator = "";
+  const asrSession = createAsrSessionState();
   let intentionalClose = false;
   let asrReconnecting = false;
+  let lastAsrAudioSentAt = 0;
+  const pendingAudioChunks: Buffer[] = [];
 
   const autoTimeout = setTimeout(() => {
     log.info("Mic test auto-timeout");
@@ -798,6 +849,31 @@ async function handleMicTestConnection(browserWs: WebSocket) {
     asrWs?.close();
     asrWs = null;
     asrAlive = false;
+    pendingAudioChunks.length = 0;
+  }
+
+  function sendMicTestAudio(audio: Buffer) {
+    if (!asrAlive || !asrWs || asrWs.readyState !== WebSocket.OPEN) {
+      pendingAudioChunks.push(audio);
+      while (pendingAudioChunks.length > ASR_MAX_PENDING_CHUNKS) {
+        pendingAudioChunks.shift();
+      }
+      return;
+    }
+    asrAudioSeq++;
+    asrWs.send(buildBigModelAudioRequest(audio, asrAudioSeq));
+    lastAsrAudioSentAt = Date.now();
+  }
+
+  function flushPendingAudio() {
+    while (
+      pendingAudioChunks.length > 0 &&
+      asrAlive &&
+      asrWs?.readyState === WebSocket.OPEN
+    ) {
+      const audio = pendingAudioChunks.shift();
+      if (audio) sendMicTestAudio(audio);
+    }
   }
 
   function bindAsrMessageHandlers(ws: WebSocket) {
@@ -807,41 +883,29 @@ async function handleMicTestConnection(browserWs: WebSocket) {
 
         if (resp.errorCode != null) {
           log.error(`Mic test ASR error: ${resp.errorCode} ${resp.errorMessage}`);
+          if (asrWs === ws) {
+            asrAlive = false;
+            ws.close();
+          }
           return;
         }
 
-        if (resp.utterances) {
-          for (const utt of resp.utterances) {
-            if (utt.text) {
-              asrAccumulator = utt.text;
-              if (browserWs.readyState === WebSocket.OPEN) {
-                browserWs.send(JSON.stringify({
-                  type: "asr",
-                  data: { results: [{ text: utt.text, definite: utt.definite }] },
-                }));
-              }
-              if (utt.definite) {
-                if (browserWs.readyState === WebSocket.OPEN) {
-                  browserWs.send(JSON.stringify({ type: "asr_ended", text: asrAccumulator.trim() }));
-                }
-                asrAccumulator = "";
-              }
-            }
+        // Volcengine repeats every settled segment on each packet, so act on the single
+        // uncommitted update rather than re-announcing finished segments.
+        const update = deriveAsrSessionUpdate(asrSession, resp);
+        if (!update.text || !update.changed) return;
+
+        if (browserWs.readyState === WebSocket.OPEN) {
+          browserWs.send(JSON.stringify({
+            type: "asr",
+            data: { results: [{ text: update.text, definite: update.definite }] },
+          }));
+          if (update.definite) {
+            browserWs.send(JSON.stringify({ type: "asr_ended", text: update.text.trim() }));
           }
-        } else if (resp.text) {
-          asrAccumulator = resp.text;
-          if (browserWs.readyState === WebSocket.OPEN) {
-            browserWs.send(JSON.stringify({
-              type: "asr",
-              data: { results: [{ text: resp.text, definite: resp.isLastPackage }] },
-            }));
-          }
-          if (resp.isLastPackage) {
-            if (browserWs.readyState === WebSocket.OPEN) {
-              browserWs.send(JSON.stringify({ type: "asr_ended", text: asrAccumulator.trim() }));
-            }
-            asrAccumulator = "";
-          }
+        }
+        if (update.definite) {
+          markAsrSessionCommitted(asrSession);
         }
       } catch (err) {
         log.error("Mic test ASR parse error:", err);
@@ -887,7 +951,7 @@ async function handleMicTestConnection(browserWs: WebSocket) {
     const asrConfig: BigModelAsrConfig = {
       format: "pcm", rate: 16000, bits: 16, channels: 1, codec: "raw",
       showUtterance: true, resultType: "full", enablePunc: true,
-      endWindowSize: ASR_END_WINDOW_MS,
+      endWindowSize: MIC_TEST_ASR_END_WINDOW_MS,
       forceToSpeechTime: ASR_FORCE_SPEECH_MS,
     };
 
@@ -895,6 +959,7 @@ async function handleMicTestConnection(browserWs: WebSocket) {
       ASR_APP_ID, ASR_ACCESS_TOKEN, reqid, ASR_RESOURCE_ID,
       ASR_API_KEY || undefined,
     );
+    const connectStartedAt = Date.now();
     const nextWs = new WebSocket(BIGMODEL_ASR_URL, { headers: wsHeaders });
 
     await new Promise<void>((resolve, reject) => {
@@ -912,11 +977,22 @@ async function handleMicTestConnection(browserWs: WebSocket) {
       });
     });
 
+    asrAudioSeq = 1;
+    // Each websocket reports a cumulative transcript of its own audio only.
+    resetAsrSessionState(asrSession);
     asrWs = nextWs;
-    asrWs.send(buildBigModelFullRequest(asrConfig, reqid));
+    nextWs.send(buildBigModelFullRequest(asrConfig, reqid));
+    // Prime cold ASR allocation with 100ms of silence before browser audio.
+    asrAudioSeq++;
+    nextWs.send(buildBigModelAudioRequest(Buffer.alloc(3200), asrAudioSeq));
+
     asrAlive = true;
-    bindAsrMessageHandlers(asrWs);
-    log.info(`Mic test ASR connected${isInitial ? "" : " (reconnected)"}`);
+    lastAsrAudioSentAt = Date.now();
+    bindAsrMessageHandlers(nextWs);
+    flushPendingAudio();
+    log.info(
+      `Mic test ASR primed in ${Date.now() - connectStartedAt}ms${isInitial ? "" : " (reconnected)"}`,
+    );
 
     if (isInitial && browserWs.readyState === WebSocket.OPEN) {
       browserWs.send(JSON.stringify({ type: "ready" }));
@@ -924,12 +1000,10 @@ async function handleMicTestConnection(browserWs: WebSocket) {
   }
 
   browserWs.on("message", (data) => {
-    if (!asrWs || asrWs.readyState !== WebSocket.OPEN || !asrAlive) return;
     try {
       const msg = JSON.parse(data.toString());
       if (msg.type === "audio" && msg.data) {
-        asrAudioSeq++;
-        asrWs.send(buildBigModelAudioRequest(Buffer.from(msg.data, "hex"), asrAudioSeq));
+        sendMicTestAudio(Buffer.from(msg.data, "hex"));
       }
     } catch { /* ignore */ }
   });
@@ -946,9 +1020,10 @@ async function handleMicTestConnection(browserWs: WebSocket) {
       if (!asrAlive || !asrWs || asrWs.readyState !== WebSocket.OPEN) {
         return;
       }
-      asrAudioSeq++;
-      asrWs.send(buildBigModelAudioRequest(Buffer.alloc(3200), asrAudioSeq));
-    }, 5000);
+      if (Date.now() - lastAsrAudioSentAt >= MIC_TEST_ASR_IDLE_KEEPALIVE_MS) {
+        sendMicTestAudio(Buffer.alloc(3200));
+      }
+    }, MIC_TEST_ASR_IDLE_KEEPALIVE_MS / 2);
   } catch (err) {
     log.error("Mic test connection failed:", err);
     if (browserWs.readyState === WebSocket.OPEN) {
@@ -974,6 +1049,10 @@ async function handleBrowserConnection(browserWs: WebSocket, ctx: InterviewConte
   // ── TTS state ──────────────────────────────────────────────────
   let ttsAbortController: AbortController | null = null;
   let ttsSpeaking = false;
+  let pendingPlaybackAck: {
+    utteranceId: string;
+    complete: () => void;
+  } | null = null;
 
   // When true, definite ASR results are dropped (only used for barge-in).
   // Set during LLM generation + TTS playback to prevent echo loops.
@@ -988,17 +1067,34 @@ async function handleBrowserConnection(browserWs: WebSocket, ctx: InterviewConte
   let currentQuestionIndex = 0;
   const questionSummaries: string[] = [];
   let questionTranscript: TranscriptEntry[] = [];
-  let asrAccumulator = "";
+  const asrSession = createAsrSessionState();
+  /**
+   * Speech carried over from earlier ASR websockets after a rotation. The current session
+   * only reports its own audio, so the pending turn is this prefix plus whatever the live
+   * session has transcribed since.
+   */
+  let pendingAsrFinalPrefix = "";
   let pendingAsrFinalText = "";
   let pendingAsrFinalTimer: ReturnType<typeof setTimeout> | null = null;
   let pendingAsrFinalStartedAt = 0;
   let pendingAsrFinalLastChangedAt = 0;
+  let asrRotationRecoveryUntil = 0;
+  let asrRotationPending = false;
+  const pendingAsrRotationAudio: Buffer[] = [];
+  /**
+   * Backstop for a provider that stops endpointing: the newest interim and when it last grew, so a
+   * turn can be committed on our own silence detection instead of waiting for `definite`.
+   */
+  let asrInterimStallText = "";
+  let asrInterimStallChangedAt = 0;
+  let asrInterimStallTimer: ReturnType<typeof setTimeout> | null = null;
   let lastUserAudioActivityAt = 0;
   let asrSessionFirstSpeechAt = 0;
   let lastAsrStuckRotationAt = 0;
   let consecutiveDuplicateSkips = 0;
   let heldBargeInInterimText = "";
   let heldBargeInInterimTimer: ReturnType<typeof setTimeout> | null = null;
+  let heldBargeInInterimStartedAt = 0;
   let isTransitioning = false;
   let transitionGeneration = 0;
   let pendingManualTransitionDirection: "next" | "previous" | null = null;
@@ -1127,29 +1223,41 @@ async function handleBrowserConnection(browserWs: WebSocket, ctx: InterviewConte
     currentQuestionIndex = startIdx;
   }
 
-  let maxFollowUps: number;
-  switch (ctx.followUpDepth) {
-    case "LIGHT":   maxFollowUps = 2; break;
-    case "MODERATE": maxFollowUps = 7; break;
-    case "DEEP":    maxFollowUps = 8; break;
-    default:        maxFollowUps = 2;
-  }
-
   log.info(
-    `Interview: "${ctx.title}" (${sortedQuestions.length} questions, lang=${ctx.language}, startQ=${currentQuestionIndex})`
+    `Interview: "${ctx.title}" (${sortedQuestions.length} questions, lang=${ctx.language}, startQ=${currentQuestionIndex}, followUpDepth=${ctx.followUpDepth})`
   );
 
   const NEXT_TOKEN = "[NEXT]";
   const PREV_TOKEN = "[PREV]";
+
+  function clearAsrInterimStall() {
+    if (asrInterimStallTimer) {
+      clearTimeout(asrInterimStallTimer);
+      asrInterimStallTimer = null;
+    }
+    asrInterimStallText = "";
+    asrInterimStallChangedAt = 0;
+  }
 
   function clearPendingAsrFinal() {
     if (pendingAsrFinalTimer) {
       clearTimeout(pendingAsrFinalTimer);
       pendingAsrFinalTimer = null;
     }
+    clearAsrInterimStall();
     pendingAsrFinalText = "";
+    pendingAsrFinalPrefix = "";
     pendingAsrFinalStartedAt = 0;
     pendingAsrFinalLastChangedAt = 0;
+    asrRotationRecoveryUntil = 0;
+    markAsrSessionCommitted(asrSession);
+  }
+
+  /** Combine speech retained across an ASR rotation with the live session's transcript. */
+  function pendingTextForSessionUpdate(sessionText: string): string {
+    if (!pendingAsrFinalPrefix) return sessionText;
+    if (!sessionText) return pendingAsrFinalPrefix;
+    return mergeAsrSegments(pendingAsrFinalPrefix, sessionText);
   }
 
   function clearHeldBargeInInterim() {
@@ -1158,6 +1266,7 @@ async function handleBrowserConnection(browserWs: WebSocket, ctx: InterviewConte
       heldBargeInInterimTimer = null;
     }
     heldBargeInInterimText = "";
+    heldBargeInInterimStartedAt = 0;
   }
 
   function getAsrFinalCoalesceDelay(text: string): number {
@@ -1202,13 +1311,23 @@ async function handleBrowserConnection(browserWs: WebSocket, ctx: InterviewConte
     if (recentlyChanged) return true;
 
     const micStillActive = Date.now() - lastUserAudioActivityAt < ASR_ACTIVE_SPEECH_HOLD_MS;
-    if (!micStillActive) return false;
+    const holdAction = activeSpeechHoldAction({
+      micStillActive,
+      heldForMs,
+      maxHoldMs: ASR_MAX_ACTIVE_SPEECH_HOLD_MS,
+      // A reconnect briefly interrupts both the provider transcript and the
+      // microphone activity signal. Keep the carried turn open through that gap.
+      rotationRecoveryActive: Date.now() < asrRotationRecoveryUntil,
+    });
+    if (holdAction === "release") return false;
 
-    if (ASR_MAX_ACTIVE_SPEECH_HOLD_MS > 0 && heldForMs > ASR_MAX_ACTIVE_SPEECH_HOLD_MS) {
+    if (holdAction === "rotate") {
       log.warn(
-        `ASR active-speech hold exceeded ${ASR_MAX_ACTIVE_SPEECH_HOLD_MS}ms; committing pending final`,
+        `ASR active-speech hold reached ${ASR_MAX_ACTIVE_SPEECH_HOLD_MS}ms; rotating ASR session (keeping pending text)`,
       );
-      return false;
+      pendingAsrFinalStartedAt = Date.now();
+      rotateAsrSession();
+      return true;
     }
 
     const textStuckMs =
@@ -1251,6 +1370,8 @@ async function handleBrowserConnection(browserWs: WebSocket, ctx: InterviewConte
    * Prevents mid-sentence cutoff while refreshing a degraded ASR session.
    */
   function rotateAsrSession() {
+    asrRotationPending = true;
+    asrRotationRecoveryUntil = Date.now() + ASR_LONG_FINAL_COALESCE_MS;
     asrIntentionalClose = true;
     if (keepAliveInterval) {
       clearInterval(keepAliveInterval);
@@ -1268,8 +1389,10 @@ async function handleBrowserConnection(browserWs: WebSocket, ctx: InterviewConte
     }
     asrWs = null;
     asrAlive = false;
-    asrAccumulator = "";
     asrSessionFirstSpeechAt = 0;
+    // The replacement websocket transcribes only the audio that follows, so what the old
+    // session already heard has to be carried forward explicitly.
+    pendingAsrFinalPrefix = pendingAsrFinalText;
     connectAsr().catch(log.error);
   }
 
@@ -1305,9 +1428,41 @@ async function handleBrowserConnection(browserWs: WebSocket, ctx: InterviewConte
     if (heldBargeInInterimTimer) {
       clearTimeout(heldBargeInInterimTimer);
     }
-    heldBargeInInterimTimer = setTimeout(() => {
+    if (!heldBargeInInterimStartedAt) {
+      heldBargeInInterimStartedAt = Date.now();
+    }
+
+    // Promoting this as its own turn while the speaker is still going splits one answer across
+    // several turns, each drawing its own reply that then gets barged into as well. Wait for the
+    // microphone to go quiet, the same way the pending-final path does, but never indefinitely —
+    // sustained room noise would otherwise strand the turn.
+    const promoteIfSettled = () => {
+      heldBargeInInterimTimer = null;
+      const heldForMs = Date.now() - heldBargeInInterimStartedAt;
+      const holdAction = activeSpeechHoldAction({
+        micStillActive:
+          Date.now() - lastUserAudioActivityAt < ASR_ACTIVE_SPEECH_HOLD_MS,
+        heldForMs,
+        maxHoldMs: ASR_MAX_ACTIVE_SPEECH_HOLD_MS,
+      });
+      if (holdAction !== "release") {
+        if (holdAction === "rotate") {
+          log.warn(
+            `ASR barge-in interim hold reached ${ASR_MAX_ACTIVE_SPEECH_HOLD_MS}ms; rotating ASR session instead of splitting active speech`,
+          );
+          heldBargeInInterimStartedAt = Date.now();
+          rotateAsrSession();
+        }
+        heldBargeInInterimTimer = setTimeout(promoteIfSettled, ASR_ACTIVE_SPEECH_HOLD_MS);
+        return;
+      }
       flushHeldBargeInInterim("no-final-after-barge-in");
-    }, ASR_FINAL_COALESCE_MS);
+    };
+
+    heldBargeInInterimTimer = setTimeout(
+      promoteIfSettled,
+      getAsrFinalCoalesceDelay(heldBargeInInterimText),
+    );
   }
 
   function sendAsrInterim(text: string) {
@@ -1324,6 +1479,14 @@ async function handleBrowserConnection(browserWs: WebSocket, ctx: InterviewConte
       type: "asr_pending",
       text,
       delayMs,
+    }));
+  }
+
+  function sendAsrCancelled(reason: string) {
+    if (browserWs.readyState !== WebSocket.OPEN) return;
+    browserWs.send(JSON.stringify({
+      type: "asr_cancelled",
+      reason,
     }));
   }
 
@@ -1354,7 +1517,10 @@ async function handleBrowserConnection(browserWs: WebSocket, ctx: InterviewConte
     const lastUserTurn = [...questionTranscript].reverse().find((e) => e.role === "user");
     if (lastUserTurn) {
       finalText = trimCrossTurnOverlap(lastUserTurn.text, finalText);
-      if (!finalText.trim()) return;
+      if (!finalText.trim()) {
+        sendAsrCancelled("cross_turn_overlap");
+        return;
+      }
     }
 
     if (
@@ -1365,12 +1531,14 @@ async function handleBrowserConnection(browserWs: WebSocket, ctx: InterviewConte
         isZh,
       )
     ) {
+      sendAsrCancelled("continuation_fragment");
       return;
     }
 
     if (isDuplicateUserFinal(finalText)) {
       consecutiveDuplicateSkips++;
       log.info(`ASR FINAL (${reason}) skipped — duplicate of answered turn: "${finalText.slice(0, 72)}..."`);
+      sendAsrCancelled("duplicate");
       if (consecutiveDuplicateSkips >= 2) {
         log.warn(`ASR stuck: ${consecutiveDuplicateSkips} consecutive duplicate skips — forcing reconnection`);
         consecutiveDuplicateSkips = 0;
@@ -1390,43 +1558,101 @@ async function handleBrowserConnection(browserWs: WebSocket, ctx: InterviewConte
     handleUserUtterance(finalText).catch(log.error);
   }
 
-  function schedulePendingAsrFinal(text: string, reason: string) {
-    const prev = pendingAsrFinalText;
-    const merged = mergeAsrSegments(pendingAsrFinalText, text);
-    const unchanged =
-      !!prev &&
-      normalizeUserUtteranceKey(prev) === normalizeUserUtteranceKey(merged);
+  function pendingAsrFinalDelay(text: string): number {
+    return asrPendingFinalDelayMs({
+      coalesceTargetMs: getAsrFinalCoalesceDelay(text),
+      quietFloorMs: ASR_PENDING_FINAL_QUIET_MS,
+      quietElapsedMs: pendingAsrFinalLastChangedAt
+        ? Date.now() - pendingAsrFinalLastChangedAt
+        : 0,
+    });
+  }
 
-    if (unchanged && pendingAsrFinalTimer) {
-      log.debug(`ASR duplicate definite while pending: "${merged.slice(0, 80)}"`);
+  /**
+   * Last-resort watch on an interim the provider has not endpointed, for the failure mode where
+   * `definite` never arrives at all. It must not act as a second endpointer competing with
+   * `end_window_size`: recognized text routinely freezes *mid-speech* while the recognizer is
+   * uncertain, so a frozen interim alone does not mean the speaker stopped. Committing on that
+   * signal cuts answers in half and, worse, starts the coalesce clock during a pause so the real
+   * window is already spent by the time the speaker finishes. Hence both a long timeout and a
+   * silent microphone are required, and the coalesce window is served in full afterwards.
+   */
+  function trackAsrInterimStall(text: string) {
+    if (ASR_INTERIM_STALL_COMMIT_MS <= 0) return;
+    const trimmed = text.trim();
+    if (trimmed.length < 2) {
+      clearAsrInterimStall();
+      return;
+    }
+    if (
+      asrInterimStallTimer &&
+      normalizeUserUtteranceKey(asrInterimStallText) === normalizeUserUtteranceKey(trimmed)
+    ) {
       return;
     }
 
-    pendingAsrFinalText = merged;
+    if (asrInterimStallTimer) clearTimeout(asrInterimStallTimer);
+    asrInterimStallText = trimmed;
+    asrInterimStallChangedAt = Date.now();
+
+    const commitIfSettled = () => {
+      asrInterimStallTimer = null;
+      const stalled = asrInterimStallText.trim();
+      if (
+        !stalled ||
+        pendingAsrFinalText ||
+        interviewDone ||
+        endingInterview ||
+        isTransitioning ||
+        suppressAsrResults
+      ) {
+        return;
+      }
+
+      // Still audibly talking: the recognizer is behind, not finished. Keep waiting.
+      if (Date.now() - lastUserAudioActivityAt < ASR_ACTIVE_SPEECH_HOLD_MS) {
+        asrInterimStallTimer = setTimeout(commitIfSettled, ASR_ACTIVE_SPEECH_HOLD_MS);
+        return;
+      }
+
+      log.warn(
+        `ASR interim stalled ${Date.now() - asrInterimStallChangedAt}ms without a definite while the mic was quiet — endpointing locally`,
+      );
+      schedulePendingAsrFinal(stalled, "interim stall");
+    };
+
+    asrInterimStallTimer = setTimeout(commitIfSettled, ASR_INTERIM_STALL_COMMIT_MS);
+  }
+
+  function schedulePendingAsrFinal(text: string, reason: string) {
+    const prev = pendingAsrFinalText;
+    const unchanged =
+      !!prev &&
+      normalizeUserUtteranceKey(prev) === normalizeUserUtteranceKey(text);
+
+    if (unchanged && pendingAsrFinalTimer) {
+      log.debug(`ASR duplicate definite while pending: "${text.slice(0, 80)}"`);
+      return;
+    }
+
+    pendingAsrFinalText = text;
     pendingAsrFinalLastChangedAt = Date.now();
     if (!pendingAsrFinalStartedAt) {
       pendingAsrFinalStartedAt = pendingAsrFinalLastChangedAt;
     }
-    sendAsrInterim(merged);
+    sendAsrInterim(text);
 
     if (pendingAsrFinalTimer) {
       clearTimeout(pendingAsrFinalTimer);
     }
-    const targetDelay = getAsrFinalCoalesceDelay(merged);
-    const elapsed = Date.now() - pendingAsrFinalStartedAt;
-    const quietElapsed = Date.now() - pendingAsrFinalLastChangedAt;
-    const delay = Math.max(
-      0,
-      targetDelay - elapsed,
-      ASR_PENDING_FINAL_QUIET_MS - quietElapsed,
-    );
+    const delay = pendingAsrFinalDelay(text);
     pendingAsrFinalTimer = setTimeout(() => {
       flushPendingAsrFinal("coalesced");
     }, delay);
-    sendAsrPending(merged, delay);
+    sendAsrPending(text, delay);
 
     log.info(
-      `ASR final pending (${reason}, ${delay}ms): "${merged.slice(0, 80)}"`,
+      `ASR final pending (${reason}, ${delay}ms): "${text.slice(0, 80)}"`,
     );
   }
 
@@ -1448,6 +1674,7 @@ async function handleBrowserConnection(browserWs: WebSocket, ctx: InterviewConte
     cancelTts();
 
     const abortController = new AbortController();
+    const utteranceId = randomUUID();
     ttsAbortController = abortController;
     ttsSpeaking = true;
 
@@ -1461,12 +1688,15 @@ async function handleBrowserConnection(browserWs: WebSocket, ctx: InterviewConte
 
     let completed = false;
     let totalAudioBytes = 0;
-    const streamStartMs = Date.now();
+    let firstAudioSentAtMs = 0;
     let sentTranscriptText = false;
     const sendTranscriptTextOnce = () => {
       if (sentTranscriptText || browserWs.readyState !== WebSocket.OPEN) return;
       sentTranscriptText = true;
-      browserWs.send(JSON.stringify({ type: "tts_text", data: { text } }));
+      browserWs.send(JSON.stringify({
+        type: "tts_text",
+        data: { text, utteranceId },
+      }));
     };
     try {
       for await (const event of synthesizeSpeech(text, auth, ttsOpts, abortController.signal)) {
@@ -1476,6 +1706,7 @@ async function handleBrowserConnection(browserWs: WebSocket, ctx: InterviewConte
         if (event.type === "audio" && event.audio) {
           sendTranscriptTextOnce();
           browserWs.send(event.audio, { binary: true });
+          if (!firstAudioSentAtMs) firstAudioSentAtMs = Date.now();
           totalAudioBytes += event.audio.length;
         } else if (event.type === "sentence_start") {
           // The full response text is sent once the first audio chunk is ready.
@@ -1494,29 +1725,44 @@ async function handleBrowserConnection(browserWs: WebSocket, ctx: InterviewConte
       }
     }
 
-    // Wait for client-side playback to finish before declaring TTS done.
-    // Audio is PCM int16 @ 24kHz = 48000 bytes/sec.
-    if (completed && !abortController.signal.aborted) {
-      const playbackDurationMs = (totalAudioBytes / 48000) * 1000;
-      const elapsedMs = Date.now() - streamStartMs;
-      const remainingMs = playbackDurationMs - elapsedMs + 300; // +300ms buffer for jitter
-      if (remainingMs > 0) {
-        await new Promise<void>((resolve) => {
-          const timer = setTimeout(resolve, remainingMs);
-          const onAbort = () => { clearTimeout(timer); resolve(); };
-          abortController.signal.addEventListener("abort", onAbort, { once: true });
-        });
-      }
+    if (completed && !abortController.signal.aborted && browserWs.readyState === WebSocket.OPEN) {
+      sendTranscriptTextOnce();
+      const elapsedSinceFirstAudioMs = firstAudioSentAtMs
+        ? Date.now() - firstAudioSentAtMs
+        : 0;
+      const fallbackMs = playbackAckFallbackMs(
+        totalAudioBytes,
+        elapsedSinceFirstAudioMs,
+      );
+
+      await new Promise<void>((resolve) => {
+        let settled = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(fallbackTimer);
+          abortController.signal.removeEventListener("abort", finish);
+          if (pendingPlaybackAck?.utteranceId === utteranceId) {
+            pendingPlaybackAck = null;
+          }
+          resolve();
+        };
+        const fallbackTimer = setTimeout(() => {
+          log.warn(
+            `Browser playback acknowledgement timed out after ${fallbackMs}ms (${utteranceId})`,
+          );
+          finish();
+        }, fallbackMs);
+
+        pendingPlaybackAck = { utteranceId, complete: finish };
+        abortController.signal.addEventListener("abort", finish, { once: true });
+        browserWs.send(JSON.stringify({ type: "tts_ended", utteranceId }));
+      });
     }
 
     ttsSpeaking = false;
     if (ttsAbortController === abortController) {
       ttsAbortController = null;
-    }
-
-    if (completed && !abortController.signal.aborted && browserWs.readyState === WebSocket.OPEN) {
-      sendTranscriptTextOnce();
-      browserWs.send(JSON.stringify({ type: "tts_ended" }));
     }
 
     return completed && !abortController.signal.aborted;
@@ -1624,12 +1870,23 @@ async function handleBrowserConnection(browserWs: WebSocket, ctx: InterviewConte
       pendingLastQuestionTimeout = null;
     }
 
-    const currentQ = sortedQuestions[currentQuestionIndex];
-    const transcriptSnapshot = [...questionTranscript];
-    if (transcriptSnapshot.length > 0) {
-      summarizeQuestion(currentQ.text, transcriptSnapshot, isZh)
-        .then((summary) => questionSummaries.push(summary))
-        .catch(log.error);
+    // Summarizing is best-effort: `endingInterview` is already latched, so
+    // throwing here would leave the participant with no farewell and the client
+    // with no `interview_complete` — the session would hang as IN_PROGRESS.
+    try {
+      const summaryTarget = questionAwaitingSummary(
+        sortedQuestions,
+        currentQuestionIndex,
+        questionTranscript.length,
+      );
+      if (summaryTarget) {
+        const transcriptSnapshot = [...questionTranscript];
+        summarizeQuestion(summaryTarget.text, transcriptSnapshot, isZh)
+          .then((summary) => questionSummaries.push(summary))
+          .catch(log.error);
+      }
+    } catch (err) {
+      log.error("Failed to summarize the final question:", err);
     }
 
     const farewell = buildFarewellSayHello(isZh);
@@ -1762,11 +2019,17 @@ async function handleBrowserConnection(browserWs: WebSocket, ctx: InterviewConte
       choiceInstruction = bt(isZh, PROMPTS.choiceInstruction.research(NEXT_TOKEN, PREV_TOKEN));
     }
 
-    const effectiveMaxFollowUps = currentQ.type === "RESEARCH"
-      ? Math.max(maxFollowUps, 7)
-      : maxFollowUps;
-    const followUpsDone = Math.max(0, userTurnsOnCurrentQ - 1);
+    const effectiveMaxFollowUps = maxFollowUpsForDepth(ctx.followUpDepth, currentQ.type);
+    const followUpsDone = countFollowUpsSpent({
+      transcript: questionTranscript,
+      userTurns: userTurnsOnCurrentQ,
+    });
     const turnsLeft = effectiveMaxFollowUps - followUpsDone;
+    const hasAnswered = hasAnsweredCurrentQuestion({
+      transcript: questionTranscript,
+      userTurns: userTurnsOnCurrentQ,
+      isZh,
+    });
     let followUpInstruction: string;
     const isCodingOrWhiteboard = currentQ.type === "CODING" || currentQ.type === "WHITEBOARD";
 
@@ -1775,10 +2038,7 @@ async function handleBrowserConnection(browserWs: WebSocket, ctx: InterviewConte
     };
 
     if (forceSkip) {
-      const skipOverride = isZh
-        ? `⚠️ 受访者已明确要求跳过/进入下一题。你必须简短回应（如"好的，没问题"），然后在回复末尾加上 ${NEXT_TOKEN}。不要试图继续提问或鼓励。`
-        : `⚠️ The participant has EXPLICITLY asked to skip / move on to the next question. You MUST briefly acknowledge (e.g. "Sure, no problem") and append ${NEXT_TOKEN} at the end. Do NOT try to help further or ask more questions.`;
-      followUpInstruction = skipOverride;
+      followUpInstruction = bt(isZh, PROMPTS.followUp.skipOverride(NEXT_TOKEN, followBudgetCtx));
       choiceInstruction = "";
     } else if (lastResponseWasCorrection) {
       followUpInstruction = isZh
@@ -1786,19 +2046,22 @@ async function handleBrowserConnection(browserWs: WebSocket, ctx: InterviewConte
         : `Wait for the participant to respond to your correction. Do NOT add ${NEXT_TOKEN}.`;
     } else if (isCodingOrWhiteboard) {
       followUpInstruction = bt(isZh, PROMPTS.followUp.codingWb(NEXT_TOKEN));
+    } else if (turnsLeft <= 0 && !hasAnswered) {
+      followUpInstruction = bt(isZh, PROMPTS.followUp.awaitingAnswer(NEXT_TOKEN));
     } else if (turnsLeft <= -1) {
       followUpInstruction = bt(isZh, PROMPTS.followUp.pastLimit(NEXT_TOKEN, followBudgetCtx));
     } else if (turnsLeft <= 0) {
       followUpInstruction = bt(isZh, PROMPTS.followUp.atLimit(NEXT_TOKEN, followBudgetCtx));
     } else if (turnsLeft === 1) {
-      followUpInstruction = bt(isZh, PROMPTS.followUp.oneLeft(NEXT_TOKEN));
+      followUpInstruction = bt(isZh, PROMPTS.followUp.oneLeft(NEXT_TOKEN, followBudgetCtx));
     } else {
-      followUpInstruction = bt(isZh, PROMPTS.followUp.remaining(turnsLeft, NEXT_TOKEN));
+      followUpInstruction = bt(isZh, PROMPTS.followUp.remaining(turnsLeft, NEXT_TOKEN, followBudgetCtx));
     }
     const mustAdvanceForFollowUpLimit =
       !forceSkip &&
       !lastResponseWasCorrection &&
       !isCodingOrWhiteboard &&
+      hasAnswered &&
       turnsLeft <= 0;
 
     const promptParams = {
@@ -1826,6 +2089,7 @@ async function handleBrowserConnection(browserWs: WebSocket, ctx: InterviewConte
       latestInterviewerPrompt: latestAnsweredExchange?.interviewer,
       latestParticipantAnswer: latestAnsweredExchange?.participant,
       forceLanguage: userLangSamples.length > 0 ? (isZh ? "zh" : "en") : undefined,
+      isLastQuestion: followBudgetCtx.isLastQuestion,
     };
 
     const prompt = bt(isZh, isCodingOrWhiteboard
@@ -1890,7 +2154,7 @@ async function handleBrowserConnection(browserWs: WebSocket, ctx: InterviewConte
       if (recentAgentResponses.length > 5) recentAgentResponses.shift();
     }
 
-    log.info(`Response LLM (${Date.now() - startMs}ms, ${maxTokens}tok, turn ${userTurnsOnCurrentQ}): "${response.slice(0, 100)}..."`);
+    log.info(`Response LLM (${Date.now() - startMs}ms, ${maxTokens}tok, turn ${userTurnsOnCurrentQ}, follow-ups ${followUpsDone}/${effectiveMaxFollowUps}): "${response.slice(0, 100)}..."`);
     return response;
   }
 
@@ -1977,6 +2241,13 @@ async function handleBrowserConnection(browserWs: WebSocket, ctx: InterviewConte
       if (!auto) queueManualTransition("next");
       return;
     }
+    // Past the last question the index already sits one beyond the end while the
+    // wrap-up is answered. There is nothing to advance to, and incrementing
+    // again would walk further out of bounds.
+    if (currentQuestionIndex >= sortedQuestions.length) {
+      queueFarewellAndEnd("Advance requested after the final question");
+      return;
+    }
     const transitionId = ++transitionGeneration;
     isTransitioning = true;
     clearPendingAsrFinal();
@@ -1992,7 +2263,6 @@ async function handleBrowserConnection(browserWs: WebSocket, ctx: InterviewConte
       const currentQ = sortedQuestions[currentQuestionIndex];
       const transcriptSnapshot = [...questionTranscript];
       questionTranscript = [];
-      asrAccumulator = "";
       userTurnsOnCurrentQ = 0;
       lastResponseWasCorrection = false;
       cachedWhiteboardDescription = "";
@@ -2081,7 +2351,6 @@ async function handleBrowserConnection(browserWs: WebSocket, ctx: InterviewConte
 
       const transcriptSnapshot = [...questionTranscript];
       questionTranscript = [];
-      asrAccumulator = "";
       userTurnsOnCurrentQ = 0;
       lastResponseWasCorrection = false;
       cachedWhiteboardDescription = "";
@@ -2092,9 +2361,15 @@ async function handleBrowserConnection(browserWs: WebSocket, ctx: InterviewConte
         pendingLastQuestionTimeout = null;
       }
 
-      const currentQ = sortedQuestions[currentQuestionIndex];
-      if (transcriptSnapshot.length > 0) {
-        const summary = await summarizeQuestion(currentQ.text, transcriptSnapshot, isZh);
+      // Absent when going back from the wrap-up window, where the transcript is
+      // the closing exchange rather than an answer to a scripted question.
+      const summaryTarget = questionAwaitingSummary(
+        sortedQuestions,
+        currentQuestionIndex,
+        transcriptSnapshot.length,
+      );
+      if (summaryTarget) {
+        const summary = await summarizeQuestion(summaryTarget.text, transcriptSnapshot, isZh);
         questionSummaries.push(summary);
       }
 
@@ -2172,7 +2447,7 @@ async function handleBrowserConnection(browserWs: WebSocket, ctx: InterviewConte
   function isReplayOfPendingUserTurn(userText: string): boolean {
     const lastEntry = questionTranscript[questionTranscript.length - 1];
     if (lastEntry?.role !== "user") return false;
-    if (!shouldSuppressAnsweredAsrFinal(lastEntry.text, userText)) return false;
+    if (!isAsrRollingRevision(lastEntry.text, userText)) return false;
 
     const merged = mergeAsrSegments(lastEntry.text, userText);
     if (normalizeUserUtteranceKey(merged).length > normalizeUserUtteranceKey(lastEntry.text).length) {
@@ -2375,7 +2650,11 @@ async function handleBrowserConnection(browserWs: WebSocket, ctx: InterviewConte
         log.error("Response generation failed:", err);
       } finally {
         generatingResponse = false;
-        if (!interviewDone && browserWs.readyState === WebSocket.OPEN) {
+        if (
+          !interviewDone &&
+          !isTransitioning &&
+          browserWs.readyState === WebSocket.OPEN
+        ) {
           try {
             await reopenAsr();
             const followUp = queuedUserUtteranceWhileGenerating.trim();
@@ -2406,6 +2685,8 @@ async function handleBrowserConnection(browserWs: WebSocket, ctx: InterviewConte
     asrIntentionalClose = true;
     clearPendingAsrFinal();
     clearHeldBargeInInterim();
+    asrRotationPending = false;
+    pendingAsrRotationAudio.length = 0;
     if (keepAliveInterval) {
       clearInterval(keepAliveInterval);
       keepAliveInterval = null;
@@ -2422,15 +2703,30 @@ async function handleBrowserConnection(browserWs: WebSocket, ctx: InterviewConte
     }
     asrWs = null;
     asrAlive = false;
-    asrAccumulator = "";
     asrSessionFirstSpeechAt = 0;
     log.info("ASR disconnected (intentional)");
   }
 
   /** Reconnect ASR after response cycle so accumulated echo text is cleared. */
   async function reopenAsr() {
+    if (
+      interviewDone ||
+      isTransitioning ||
+      browserWs.readyState !== WebSocket.OPEN
+    ) {
+      return;
+    }
+
     try {
       await connectAsr();
+      if (
+        interviewDone ||
+        isTransitioning ||
+        browserWs.readyState !== WebSocket.OPEN
+      ) {
+        disconnectAsr();
+        return;
+      }
       if (!keepAliveInterval) {
         keepAliveInterval = setInterval(() => {
           if (!asrAlive || !asrWs || asrWs.readyState !== WebSocket.OPEN) return;
@@ -2523,6 +2819,8 @@ async function handleBrowserConnection(browserWs: WebSocket, ctx: InterviewConte
     asrIntentionalClose = false;
     const reqid = randomUUID().replace(/-/g, "");
     asrAudioSeq = 1;
+    // Each websocket reports a cumulative transcript of its own audio only.
+    resetAsrSessionState(asrSession);
 
     const asrConfig: BigModelAsrConfig = {
       language: resolveBigModelAsrLanguage(ctx.language),
@@ -2572,6 +2870,23 @@ async function handleBrowserConnection(browserWs: WebSocket, ctx: InterviewConte
     asrWs.send(buildBigModelFullRequest(asrConfig, reqid));
     asrAlive = true;
 
+    if (asrRotationPending) {
+      const bufferedChunks = pendingAsrRotationAudio.length;
+      while (
+        pendingAsrRotationAudio.length > 0 &&
+        asrWs.readyState === WebSocket.OPEN
+      ) {
+        const pcm = pendingAsrRotationAudio.shift();
+        if (!pcm) break;
+        asrAudioSeq++;
+        asrWs.send(buildBigModelAudioRequest(pcm, asrAudioSeq));
+      }
+      asrRotationPending = false;
+      if (bufferedChunks > 0) {
+        log.info(`ASR rotation replayed ${bufferedChunks} buffered audio chunk(s)`);
+      }
+    }
+
     asrWs.on("message", (data: Buffer) => {
       try {
         const resp = parseAsrResponse(Buffer.from(data));
@@ -2583,164 +2898,152 @@ async function handleBrowserConnection(browserWs: WebSocket, ctx: InterviewConte
 
         if (interviewDone) return;
 
-        // Unified handler for both utterance-based and text-based ASR results
-        const results: { text: string; definite: boolean }[] = [];
-        if (resp.utterances) {
-          for (const utt of resp.utterances) {
-            if (utt.text) results.push({ text: utt.text, definite: !!utt.definite });
+        // Volcengine resends the whole session transcript on every packet, so derive the one
+        // uncommitted update it represents instead of replaying each finished segment.
+        const update = deriveAsrSessionUpdate(asrSession, resp);
+
+        if (!update.text) {
+          if (resp.messageType !== 1 && resp.messageType !== 9) {
+            log.info(`ASR non-text msg: type=${resp.messageType}, code=${resp.code}, seq=${resp.sequence}`);
           }
-        } else if (resp.text) {
-          results.push({ text: resp.text, definite: !!resp.isLastPackage });
+          return;
         }
 
-        if (results.length === 0 && resp.messageType !== 1 && resp.messageType !== 9) {
-          log.info(`ASR non-text msg: type=${resp.messageType}, code=${resp.code}, seq=${resp.sequence}`);
+        // A repeat of an already-settled segment says nothing new.
+        if (!update.changed) return;
+
+        const definite = update.definite;
+        let text = update.text;
+
+        // Server-side barge-in: interim speech during TTS → cancel TTS immediately
+        if (shouldHoldBargeInInterimForFinal({
+          text,
+          definite,
+          ttsSpeaking,
+          endingInterview,
+        })) {
+          log.info(`Barge-in detected via ASR (interim: "${text.slice(0, 40)}") — cancelling TTS`);
+          holdBargeInInterim(text);
+          cancelTts();
+          suppressAsrResults = false;
+          generatingResponse = false;
+          if (browserWs.readyState === WebSocket.OPEN) {
+            browserWs.send(JSON.stringify({ type: "interrupt" }));
+          }
+          return;
         }
 
-        for (const r of results) {
-          // Server-side barge-in: interim speech during TTS → cancel TTS immediately
-          if (shouldHoldBargeInInterimForFinal({
-            text: r.text,
-            definite: r.definite,
-            ttsSpeaking,
-            endingInterview,
-          })) {
-            log.info(`Barge-in detected via ASR (interim: "${r.text.slice(0, 40)}") — cancelling TTS`);
-            holdBargeInInterim(r.text);
-            cancelTts();
-            suppressAsrResults = false;
-            generatingResponse = false;
-            if (browserWs.readyState === WebSocket.OPEN) {
-              browserWs.send(JSON.stringify({ type: "interrupt" }));
-            }
-            continue;
+        if (heldBargeInInterimText && text.trim()) {
+          text = mergeAsrSegments(heldBargeInInterimText, text);
+          clearHeldBargeInInterim();
+        }
+
+        // During suppression, defer user finals for flush after reopenAsr.
+        // Echo of TTS is mostly definite; we guard on flush. Forward interims
+        // only when not playing TTS so live captions work during LLM wait.
+        if (suppressAsrResults) {
+          const suppressedText = text.trim();
+          if (
+            suppressedText.length >= 2 &&
+            !definite &&
+            !ttsSpeaking &&
+            browserWs.readyState === WebSocket.OPEN &&
+            !isDuplicateUserFinal(suppressedText) &&
+            !shouldIgnoreVolcContinuationFragment(
+              suppressedText,
+              questionTranscript,
+              lastAssistantMessageWallClockMs,
+              isZh,
+            )
+          ) {
+            browserWs.send(JSON.stringify({
+              type: "asr",
+              data: { results: [{ text: suppressedText, definite }] },
+            }));
           }
+          if (definite) {
+            if (suppressedText.length >= 2) {
+              if (
+                shouldIgnoreVolcContinuationFragment(
+                  suppressedText,
+                  questionTranscript,
+                  lastAssistantMessageWallClockMs,
+                  isZh,
+                )
+              ) {
+                return;
+              }
+              const prevPending = pendingUserUtteranceWhileSuppressed.trim();
+              const incomingDup = isDuplicateUserFinal(suppressedText);
+              const sameAsPending =
+                normalizeUserUtteranceKey(suppressedText)
+                === normalizeUserUtteranceKey(prevPending);
 
-          if (heldBargeInInterimText && r.text.trim()) {
-            r.text = mergeAsrSegments(heldBargeInInterimText, r.text);
-            clearHeldBargeInInterim();
-          }
-
-          // During suppression, defer user finals for flush after reopenAsr.
-          // Echo of TTS is mostly definite; we guard on flush. Forward interims
-          // only when not playing TTS so live captions work during LLM wait.
-          if (suppressAsrResults) {
-            const suppressedText = r.text.trim();
-            if (
-              suppressedText.length >= 2 &&
-              !r.definite &&
-              !ttsSpeaking &&
-              browserWs.readyState === WebSocket.OPEN &&
-              !isDuplicateUserFinal(suppressedText) &&
-              !shouldIgnoreVolcContinuationFragment(
-                suppressedText,
-                questionTranscript,
-                lastAssistantMessageWallClockMs,
-                isZh,
-              )
-            ) {
-              browserWs.send(JSON.stringify({
-                type: "asr",
-                data: { results: [{ text: suppressedText, definite: r.definite }] },
-              }));
-            }
-            if (r.definite) {
-              const suppressedFinal = suppressedText;
-              asrAccumulator = "";
-              if (suppressedFinal.length >= 2) {
-                if (
-                  shouldIgnoreVolcContinuationFragment(
-                    suppressedFinal,
-                    questionTranscript,
-                    lastAssistantMessageWallClockMs,
-                    isZh,
-                  )
-                ) {
-                  continue;
-                }
-                const prevPending = pendingUserUtteranceWhileSuppressed.trim();
-                const incomingDup = isDuplicateUserFinal(suppressedFinal);
-                const sameAsPending =
-                  normalizeUserUtteranceKey(suppressedFinal)
-                  === normalizeUserUtteranceKey(prevPending);
-
-                // Volc can emit a late duplicate definite for an old turn after a newer utterance
-                // was deferred here — blindly overwriting would drop the real follow-up on flush.
-                if (
-                  prevPending &&
-                  incomingDup &&
-                  !sameAsPending
-                ) {
-                  log.info(
-                    `Keeping deferred utterance — ignoring stale duplicate: "${suppressedFinal.slice(0, 72)}..."`,
-                  );
-                } else if (!incomingDup || sameAsPending) {
-                  pendingUserUtteranceWhileSuppressed = suppressedFinal;
-                } else if (!prevPending) {
-                  log.info(
-                    `Suppressed ASR final skipped (already answered, nothing deferred): "${suppressedFinal.slice(0, 72)}..."`,
-                  );
-                }
+              // Volc can emit a late duplicate definite for an old turn after a newer utterance
+              // was deferred here — blindly overwriting would drop the real follow-up on flush.
+              if (
+                prevPending &&
+                incomingDup &&
+                !sameAsPending
+              ) {
+                log.info(
+                  `Keeping deferred utterance — ignoring stale duplicate: "${suppressedText.slice(0, 72)}..."`,
+                );
+              } else if (!incomingDup || sameAsPending) {
+                pendingUserUtteranceWhileSuppressed = suppressedText;
+              } else if (!prevPending) {
+                log.info(
+                  `Suppressed ASR final skipped (already answered, nothing deferred): "${suppressedText.slice(0, 72)}..."`,
+                );
               }
             }
-            continue;
           }
+          return;
+        }
 
-          if (endingInterview) {
-            if (r.definite) asrAccumulator = "";
-            continue;
-          }
+        if (endingInterview) return;
 
-          if (!asrSessionFirstSpeechAt && r.text.trim()) {
-            asrSessionFirstSpeechAt = Date.now();
-          }
+        if (!asrSessionFirstSpeechAt && text.trim()) {
+          asrSessionFirstSpeechAt = Date.now();
+        }
 
-          if (pendingAsrFinalText && !r.definite) {
-            const { text: merged, changed } = mergePendingAsrInterim(pendingAsrFinalText, r.text);
-            if (!changed) {
-              log.debug(`ASR duplicate interim while pending: "${merged.slice(0, 80)}"`);
-              continue;
-            }
-            pendingAsrFinalText = merged;
-            pendingAsrFinalLastChangedAt = Date.now();
-            asrAccumulator = merged;
-            sendAsrInterim(merged);
+        const pendingText = pendingTextForSessionUpdate(text);
+
+        if (!definite) {
+          sendAsrInterim(pendingText);
+          trackAsrInterimStall(pendingText);
+
+          // Speech resumed after an endpoint (a short pause mid-answer): keep the turn open
+          // and push the commit out so the rest of the sentence lands in the same turn.
+          if (pendingAsrFinalText) {
+            // Only real growth restarts the quiet clock. `definite` can flip back to false with the
+            // wording unchanged, and treating that as new speech re-armed the timer indefinitely,
+            // which also hid the stuck-text and max-hold safety valves that key off this timestamp.
+            const grew =
+              normalizeUserUtteranceKey(pendingAsrFinalText)
+              !== normalizeUserUtteranceKey(pendingText);
+            pendingAsrFinalText = pendingText;
+            if (grew) pendingAsrFinalLastChangedAt = Date.now();
             if (pendingAsrFinalTimer) {
               clearTimeout(pendingAsrFinalTimer);
             }
-            const targetDelay = getAsrFinalCoalesceDelay(merged);
-            const elapsed = pendingAsrFinalStartedAt
-              ? Date.now() - pendingAsrFinalStartedAt
-              : 0;
-            const quietElapsed = pendingAsrFinalLastChangedAt
-              ? Date.now() - pendingAsrFinalLastChangedAt
-              : 0;
-            const delay = Math.max(0, targetDelay - elapsed, ASR_PENDING_FINAL_QUIET_MS - quietElapsed);
+            const delay = pendingAsrFinalDelay(pendingText);
             pendingAsrFinalTimer = setTimeout(() => {
               flushPendingAsrFinal("coalesced");
             }, delay);
-            sendAsrPending(merged, delay);
-            log.info(`ASR continuation merged: "${merged.slice(0, 80)}"`);
-            continue;
+            sendAsrPending(pendingText, delay);
+            log.info(`ASR continuation merged: "${pendingText.slice(0, 80)}"`);
           }
+          return;
+        }
 
-          asrAccumulator = pendingAsrFinalText
-            ? mergeAsrSegments(pendingAsrFinalText, r.text)
-            : r.text;
+        clearAsrInterimStall();
 
-          if (!r.definite) {
-            sendAsrInterim(asrAccumulator);
-          }
-
-          if (r.definite) {
-            const finalText = asrAccumulator.trim();
-            asrAccumulator = "";
-            if (finalText && finalText.length >= 2) {
-              schedulePendingAsrFinal(finalText, "definite");
-            } else {
-              clearPendingAsrFinal();
-            }
-          }
+        const finalText = pendingText.trim();
+        if (finalText.length >= 2) {
+          schedulePendingAsrFinal(finalText, "definite");
+        } else {
+          clearPendingAsrFinal();
         }
       } catch (err) {
         log.error("ASR parse error:", err);
@@ -2862,7 +3165,16 @@ async function handleBrowserConnection(browserWs: WebSocket, ctx: InterviewConte
       if (msg.type === "audio" && msg.data) {
         const pcm = Buffer.from(msg.data, "hex");
         noteIncomingAudioActivity(pcm);
-        if (!asrAlive || isTransitioning || !asrWs || asrWs.readyState !== WebSocket.OPEN) return;
+        if (isTransitioning) return;
+        if (!asrAlive || !asrWs || asrWs.readyState !== WebSocket.OPEN) {
+          if (asrRotationPending) {
+            pendingAsrRotationAudio.push(pcm);
+            while (pendingAsrRotationAudio.length > ASR_MAX_PENDING_CHUNKS) {
+              pendingAsrRotationAudio.shift();
+            }
+          }
+          return;
+        }
         asrAudioSeq++;
         asrWs.send(buildBigModelAudioRequest(pcm, asrAudioSeq));
       } else if (msg.type === "barge_in") {
@@ -2874,6 +3186,16 @@ async function handleBrowserConnection(browserWs: WebSocket, ctx: InterviewConte
           if (browserWs.readyState === WebSocket.OPEN) {
             browserWs.send(JSON.stringify({ type: "interrupt" }));
           }
+        }
+      } else if (msg.type === "playback_ended") {
+        const playbackAck = pendingPlaybackAck;
+        if (
+          playbackAck &&
+          typeof msg.utteranceId === "string" &&
+          playbackAck.utteranceId === msg.utteranceId
+        ) {
+          log.debug(`Browser playback completed (${msg.utteranceId})`);
+          playbackAck.complete();
         }
       } else if (msg.type === "text_input" && msg.content) {
         const userText = (msg.content as string).trim();

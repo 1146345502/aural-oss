@@ -16,7 +16,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { InterviewContext } from "@/hooks/use-voice";
-import { getMicTestMessage, getSpeechSynthesisLocale } from "@/lib/i18n";
+import { DEFAULT_FOLLOW_UP_DEPTH } from "@/lib/follow-up-depth";
+import { getMicTestMessage } from "@/lib/i18n";
 import {
     setCameraSkipped,
     setScreenSkipped,
@@ -24,11 +25,17 @@ import {
 } from "@/lib/media-stream-store";
 import { cn } from "@/lib/utils";
 import {
+    bufferMicAudioChunk,
+    encodeMicAudioChunk,
+    MIC_AUDIO_CHUNK_SAMPLES,
+} from "@/lib/voice/mic-audio";
+import {
     buildRelayTargets,
     isRecoverableRelayErrorMessage,
     RelayConnector,
     resolveRelayPrimaryPreference,
 } from "@/lib/voice/relay-routing";
+import { isBrowserPlayableTtsContentType } from "@/lib/voice/tts-content-type";
 import {
     AlertCircle,
     AudioLines,
@@ -124,7 +131,7 @@ export function PreviewWrapper({
                 transcript, whiteboard, and more — so you know exactly where
                 everything is.
               </p>
-              <div className="flex items-stretch gap-3 pt-3">
+              <div className="flex flex-col-reverse gap-3 pt-3 sm:flex-row sm:items-stretch">
                 <Button
                   variant="ghost"
                   size="lg"
@@ -133,7 +140,7 @@ export function PreviewWrapper({
                 >
                   Skip for now
                 </Button>
-                <Button className="flex-1" size="lg" onClick={handleStartTour}>
+                <Button className="sm:flex-1" size="lg" onClick={handleStartTour}>
                   Take a quick tour
                 </Button>
               </div>
@@ -152,7 +159,7 @@ export function PreviewWrapper({
                 You can start the interview now, or restart the tour if you&apos;d like another look.
               </p>
             </div>
-            <div className="flex items-stretch gap-3">
+            <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-stretch">
               <Button
                 variant="outline"
                 size="lg"
@@ -162,7 +169,7 @@ export function PreviewWrapper({
                 <RotateCcw className="h-3.5 w-3.5" />
                 Restart tour
               </Button>
-              <Button className="flex-1" size="lg" onClick={onReady}>
+              <Button className="sm:flex-1" size="lg" onClick={onReady}>
                 Start Interview
               </Button>
             </div>
@@ -419,7 +426,65 @@ function CameraCheck({
   );
 }
 
-type MicPhase = "idle" | "requesting" | "playing" | "listening" | "analyzing" | "confirm";
+type MicPhase = "idle" | "requesting" | "playing" | "connecting" | "listening" | "analyzing" | "confirm";
+const MIC_TEST_ECHO_SETTLE_MS = 200;
+const MIC_TEST_INITIAL_ECHO_IGNORE_MS = 600;
+
+function normalizeMicTestText(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/["'’.,!?;:]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getMicTestTokens(text: string): string[] {
+  return normalizeMicTestText(text)
+    .split(" ")
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3);
+}
+
+function isLikelyMicTestPromptEcho(text: string, language?: string): boolean {
+  const normalized = normalizeMicTestText(text);
+  if (normalized.length < 4) return false;
+
+  const prompt = normalizeMicTestText(getMicTestMessage(language));
+  if (!prompt) return false;
+
+  if (normalized === prompt) return true;
+  if (prompt.startsWith(normalized) || normalized.startsWith(prompt)) return true;
+
+  const transcriptTokens = getMicTestTokens(normalized);
+  if (transcriptTokens.length < 2) return false;
+
+  const promptTokens = new Set(getMicTestTokens(prompt));
+  if (promptTokens.size === 0) return false;
+
+  const overlappingTokens = transcriptTokens.filter((token) => promptTokens.has(token)).length;
+  const transcriptCoverage = overlappingTokens / transcriptTokens.length;
+  const promptCoverage = overlappingTokens / promptTokens.size;
+
+  return transcriptCoverage >= 0.75 && promptCoverage >= 0.2;
+}
+
+/** Partial ASR chunk is substantial enough to pass the mic test early (avoids finishing on single-letter noise). */
+function isMicTestSubstantivePartial(text: string): boolean {
+  const compact = normalizeMicTestText(text).replace(/\s/g, "");
+  if (compact.length < 1) return false;
+  if (compact.length === 1 && /^[a-z]$/i.test(compact)) return false;
+  return true;
+}
+
+/** Parsed ASR text for mic test UI; does not affect confirmation / echo filtering. */
+function extractMicTestAsrText(msg: Record<string, unknown>): string {
+  const data = msg.data as { results?: Array<{ text?: unknown }> } | undefined;
+  const r0 = data?.results?.[0]?.text;
+  if (typeof r0 === "string" && r0.trim()) return r0.trim();
+  const top = msg.text ?? msg.transcript;
+  if (typeof top === "string" && top.trim()) return top.trim();
+  return "";
+}
 
 function MicCheck({ done, onDone, language, allowSkip = true }: { done: boolean; onDone: () => void; language?: string; allowSkip?: boolean }) {
   const [phase, setPhase] = useState<MicPhase>("idle");
@@ -428,11 +493,14 @@ function MicCheck({ done, onDone, language, allowSkip = true }: { done: boolean;
   const [skipped, setSkipped] = useState(false);
   const [transcript, setTranscript] = useState("");
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioObjectUrlRef = useRef<string | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const relayConnectorRef = useRef<RelayConnector<Record<string, unknown>> | null>(null);
   const micCtxRef = useRef<AudioContext | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
+  const listenDelayRef = useRef<number | null>(null);
+  const listenTimeoutRef = useRef<number | null>(null);
 
   const onDoneRef = useRef(onDone);
   onDoneRef.current = onDone;
@@ -440,6 +508,14 @@ function MicCheck({ done, onDone, language, allowSkip = true }: { done: boolean;
   languageRef.current = language;
 
   const stopAll = useCallback(() => {
+    if (listenDelayRef.current !== null) {
+      window.clearTimeout(listenDelayRef.current);
+      listenDelayRef.current = null;
+    }
+    if (listenTimeoutRef.current !== null) {
+      window.clearTimeout(listenTimeoutRef.current);
+      listenTimeoutRef.current = null;
+    }
     if (abortRef.current) {
       abortRef.current.abort();
       abortRef.current = null;
@@ -451,6 +527,10 @@ function MicCheck({ done, onDone, language, allowSkip = true }: { done: boolean;
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current = null;
+    }
+    if (audioObjectUrlRef.current) {
+      URL.revokeObjectURL(audioObjectUrlRef.current);
+      audioObjectUrlRef.current = null;
     }
     relayConnectorRef.current?.close();
     relayConnectorRef.current = null;
@@ -492,6 +572,10 @@ function MicCheck({ done, onDone, language, allowSkip = true }: { done: boolean;
       audioRef.current.pause();
       audioRef.current = null;
     }
+    if (audioObjectUrlRef.current) {
+      URL.revokeObjectURL(audioObjectUrlRef.current);
+      audioObjectUrlRef.current = null;
+    }
     if (abortRef.current) {
       abortRef.current.abort();
       abortRef.current = null;
@@ -499,19 +583,40 @@ function MicCheck({ done, onDone, language, allowSkip = true }: { done: boolean;
     getSpeechSynthesisApi()?.cancel();
   }, [getSpeechSynthesisApi]);
 
-  const startListening = useCallback((quiet = false) => {
-    if (!quiet) {
-      setPhase("listening");
-      setTranscript("");
-    }
+  const startListening = useCallback(() => {
+    setPhase("connecting");
+    setTranscript("");
 
     let lastAsrText = "";
     let handled = false;
     let micStarted = false;
+    let captureStartedAt = 0;
+    let micReady = false;
+    let relayReady = false;
+    const pendingAudio: string[] = [];
+
+    const markListeningReady = () => {
+      if (handled || !micReady || !relayReady) return;
+      setPhase("listening");
+    };
+
+    const flushPendingAudio = () => {
+      const connector = relayConnectorRef.current;
+      if (!connector?.isReady) return;
+      while (pendingAudio.length > 0) {
+        const chunk = pendingAudio.shift();
+        if (chunk) connector.sendJson({ type: "audio", data: chunk });
+      }
+    };
 
     const finish = (text: string) => {
       if (handled) return;
       handled = true;
+      pendingAudio.length = 0;
+      if (listenTimeoutRef.current !== null) {
+        window.clearTimeout(listenTimeoutRef.current);
+        listenTimeoutRef.current = null;
+      }
       stopTtsPlayback();
       if (micCtxRef.current) {
         micCtxRef.current.close().catch(() => {});
@@ -525,7 +630,7 @@ function MicCheck({ done, onDone, language, allowSkip = true }: { done: boolean;
       relayConnectorRef.current = null;
       if (text.trim()) {
         analyzeResponse(text);
-      } else if (!quiet) {
+      } else {
         analyzeResponse("");
       }
     };
@@ -534,6 +639,7 @@ function MicCheck({ done, onDone, language, allowSkip = true }: { done: boolean;
       if (micStarted || handled) return;
       micStarted = true;
       try {
+        captureStartedAt = performance.now();
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: {
             sampleRate: 16000,
@@ -547,16 +653,19 @@ function MicCheck({ done, onDone, language, allowSkip = true }: { done: boolean;
 
         const ctx = new AudioContext({ sampleRate: 16000 });
         micCtxRef.current = ctx;
+        if (ctx.state === "suspended") {
+          await ctx.resume();
+        }
 
         const workletCode = `
           class MicProcessor extends AudioWorkletProcessor {
-            constructor() { super(); this._buf = new Float32Array(4096); this._pos = 0; }
+            constructor() { super(); this._buf = new Float32Array(${MIC_AUDIO_CHUNK_SAMPLES}); this._pos = 0; }
             process(inputs) {
               const ch = inputs[0]?.[0];
               if (!ch) return true;
               for (let i = 0; i < ch.length; i++) {
                 this._buf[this._pos++] = ch[i];
-                if (this._pos >= 4096) { this.port.postMessage(this._buf); this._buf = new Float32Array(4096); this._pos = 0; }
+                if (this._pos >= ${MIC_AUDIO_CHUNK_SAMPLES}) { this.port.postMessage(this._buf); this._buf = new Float32Array(${MIC_AUDIO_CHUNK_SAMPLES}); this._pos = 0; }
               }
               return true;
             }
@@ -570,22 +679,25 @@ function MicCheck({ done, onDone, language, allowSkip = true }: { done: boolean;
 
         const source = ctx.createMediaStreamSource(stream);
         const worklet = new AudioWorkletNode(ctx, "mic-processor");
+        const silentGain = ctx.createGain();
+        silentGain.gain.value = 0;
         source.connect(worklet);
-        worklet.connect(ctx.destination);
+        worklet.connect(silentGain);
+        silentGain.connect(ctx.destination);
+        micReady = true;
+        markListeningReady();
 
         worklet.port.onmessage = (e) => {
-          if (handled || !relayConnectorRef.current?.isReady) return;
+          if (handled) return;
           const input = e.data as Float32Array;
-          const pcm = new Int16Array(input.length);
-          for (let i = 0; i < input.length; i++) {
-            pcm[i] = Math.max(-32768, Math.min(32767, input[i] * 32768));
+          const hex = encodeMicAudioChunk(input);
+          const connector = relayConnectorRef.current;
+          if (!connector?.isReady) {
+            bufferMicAudioChunk(pendingAudio, hex);
+            return;
           }
-          const bytes = new Uint8Array(pcm.buffer);
-          let hex = "";
-          for (let i = 0; i < bytes.length; i++) {
-            hex += bytes[i].toString(16).padStart(2, "0");
-          }
-          relayConnectorRef.current?.sendJson({ type: "audio", data: hex });
+          flushPendingAudio();
+          connector.sendJson({ type: "audio", data: hex });
         };
       } catch {
         finish("");
@@ -605,22 +717,38 @@ function MicCheck({ done, onDone, language, allowSkip = true }: { done: boolean;
       }),
       buildInitMessage: () => ({ type: "mic_test", language: languageRef.current }),
       onConnected: () => {
-        void startMicCapture();
+        relayReady = true;
+        flushPendingAudio();
+        markListeningReady();
       },
       onJsonMessage: (msg, { connector: activeConnector }) => {
         if (handled) return;
+        const isInitialEchoWindow =
+          captureStartedAt > 0 &&
+          performance.now() - captureStartedAt < MIC_TEST_INITIAL_ECHO_IGNORE_MS;
         if (msg.type === "asr") {
-          const data = msg.data as { results?: Array<{ text?: string }> } | undefined;
-          const results = data?.results || [];
-          if (results.length > 0 && results[0].text) {
-            lastAsrText = results[0].text;
-            setTranscript(lastAsrText);
-            stopTtsPlayback();
-            setPhase("listening");
+          const text = extractMicTestAsrText(msg);
+          if (text) {
+            setTranscript(text);
+          }
+          if (!text) return;
+          if (
+            isInitialEchoWindow ||
+            isLikelyMicTestPromptEcho(text, languageRef.current)
+          ) {
+            return;
+          }
+          lastAsrText = text;
+          if (isMicTestSubstantivePartial(text)) {
+            finish(text);
           }
         } else if (msg.type === "asr_ended") {
           const text = ((msg.text as string) || lastAsrText).trim();
-          if (text) {
+          if (
+            text &&
+            !isInitialEchoWindow &&
+            !isLikelyMicTestPromptEcho(text, languageRef.current)
+          ) {
             finish(text);
           }
         } else if (msg.type === "disconnected") {
@@ -648,16 +776,33 @@ function MicCheck({ done, onDone, language, allowSkip = true }: { done: boolean;
     });
 
     relayConnectorRef.current = connector;
+    // Start capturing immediately and buffer while the relay establishes its
+    // upstream ASR session. This prevents speech at the phase boundary from
+    // being lost and makes "Listening" mean the whole pipeline is ready.
+    void startMicCapture();
     void connector.connect().catch(() => {
       if (!handled) finish(lastAsrText);
     });
 
-    setTimeout(() => {
+    listenTimeoutRef.current = window.setTimeout(() => {
+      listenTimeoutRef.current = null;
       if (!handled) finish(lastAsrText);
     }, 25000);
   }, [analyzeResponse, stopTtsPlayback]);
 
+  const startListeningAfterPlayback = useCallback(() => {
+    if (listenDelayRef.current !== null) {
+      window.clearTimeout(listenDelayRef.current);
+    }
+    listenDelayRef.current = window.setTimeout(() => {
+      listenDelayRef.current = null;
+      startListening();
+    }, MIC_TEST_ECHO_SETTLE_MS);
+  }, [startListening]);
+
   const playTTS = useCallback(async () => {
+    stopTtsPlayback();
+    getSpeechSynthesisApi()?.cancel();
     setError(null);
     setPhase("requesting");
 
@@ -670,113 +815,84 @@ function MicCheck({ done, onDone, language, allowSkip = true }: { done: boolean;
       return;
     }
 
-    startListening(true);
-    setPhase("playing");
-
     const msg = getMicTestMessage(language);
 
-    // Try S2S streaming endpoint first (same voice as interview)
     try {
       const abort = new AbortController();
       abortRef.current = abort;
 
-      const res = await fetch("/api/voice/tts-s2s", {
+      const res = await fetch(`/api/voice/tts-s2s?format=wav&t=${Date.now()}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        headers: {
+          Accept: "audio/mpeg, audio/wav",
+          "Content-Type": "application/json",
+          "X-Aural-TTS-Format": "wav",
+        },
         body: JSON.stringify({ text: msg, language: languageRef.current }),
         signal: abort.signal,
       });
 
-      if (res.ok && res.body) {
-        const ctx = new AudioContext({ sampleRate: 24000 });
-        audioCtxRef.current = ctx;
-        const reader = res.body.getReader();
-        let playTime = ctx.currentTime;
-        let leftover: Uint8Array | null = null;
+      abortRef.current = null;
 
-
-        while (true) {
-          const { done: readerDone, value } = await reader.read();
-          if (readerDone || !value || value.length === 0) break;
-
-          // Merge leftover bytes from previous chunk to maintain
-          // float32 sample alignment (4 bytes per sample).
-          let bytes: Uint8Array;
-          if (leftover) {
-            bytes = new Uint8Array(leftover.length + value.length);
-            bytes.set(leftover);
-            bytes.set(value, leftover.length);
-            leftover = null;
-          } else {
-            bytes = value;
-          }
-
-          const remainder = bytes.length % 4;
-          const usable = bytes.length - remainder;
-          if (remainder > 0) {
-            leftover = bytes.slice(usable);
-          }
-          if (usable === 0) continue;
-
-          // Copy into a properly-aligned ArrayBuffer for Float32Array
-          const aligned = new ArrayBuffer(usable);
-          new Uint8Array(aligned).set(bytes.subarray(0, usable));
-          const float32 = new Float32Array(aligned);
-
-          if (float32.length === 0) continue;
-
-          const buf = ctx.createBuffer(1, float32.length, 24000);
-          buf.getChannelData(0).set(float32);
-          const source = ctx.createBufferSource();
-          source.buffer = buf;
-          source.connect(ctx.destination);
-
-          const startAt = Math.max(ctx.currentTime, playTime);
-          source.start(startAt);
-          playTime = startAt + buf.duration;
-        }
-
-        // Wait for all scheduled audio to finish, then listen
-        const remaining = playTime - ctx.currentTime;
-        if (remaining > 0) {
-          await new Promise((r) => setTimeout(r, remaining * 1000 + 100));
-        }
-        ctx.close().catch(() => {});
-        audioCtxRef.current = null;
-        abortRef.current = null;
-        if (relayConnectorRef.current?.isReady) {
-          setPhase("listening");
-        } else {
-          startListening();
-        }
-        return;
+      if (res.status === 204) {
+        throw new Error("Seed TTS not available for this client");
       }
-    } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") return;
-      // S2S unavailable, fall back to browser SpeechSynthesis
-    }
 
-    fallbackToSpeechSynthesis();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [startListening]);
+      if (!res.ok) {
+        throw new Error(`Seed TTS HTTP ${res.status}`);
+      }
 
-  const fallbackToSpeechSynthesis = useCallback(() => {
-    const speechSynthesisApi = getSpeechSynthesisApi();
-    if (!speechSynthesisApi || typeof SpeechSynthesisUtterance === "undefined") {
-      startListening();
+      const contentType = res.headers.get("content-type") || "";
+      if (!isBrowserPlayableTtsContentType(contentType)) {
+        throw new Error(`Unexpected Seed TTS content type: ${contentType}`);
+      }
+
+      const blob = await res.blob();
+      if (blob.size === 0) {
+        throw new Error("Seed TTS returned no audio");
+      }
+
+      const audioUrl = URL.createObjectURL(blob);
+      audioObjectUrlRef.current = audioUrl;
+      setPhase("playing");
+
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const audio = new Audio(audioUrl);
+          audioRef.current = audio;
+          audio.preload = "auto";
+          audio.onended = () => resolve();
+          audio.onerror = () => reject(new Error("Seed TTS audio playback failed"));
+
+          const startPlayback = () => {
+            void audio.play().catch(reject);
+          };
+
+          // First decode after a fresh tab/HMR can glitch if play() races the decoder.
+          if (audio.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
+            startPlayback();
+          } else {
+            audio.addEventListener("canplaythrough", () => startPlayback(), { once: true });
+            audio.load();
+          }
+        });
+      } finally {
+        audioRef.current = null;
+        if (audioObjectUrlRef.current) {
+          URL.revokeObjectURL(audioObjectUrlRef.current);
+          audioObjectUrlRef.current = null;
+        }
+      }
+      startListeningAfterPlayback();
       return;
+    } catch (err) {
+      abortRef.current = null;
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      setError("Unable to play Seed TTS. Please retry the microphone test.");
+      setPhase("idle");
     }
-
-    setPhase("playing");
-    const msg = getMicTestMessage(language);
-    const utterance = new SpeechSynthesisUtterance(msg);
-    utterance.rate = 1;
-    utterance.pitch = 1;
-    utterance.lang = getSpeechSynthesisLocale(language);
-    utterance.onend = () => { if (relayConnectorRef.current?.isReady) { setPhase("listening"); } else { startListening(); } };
-    utterance.onerror = () => { if (relayConnectorRef.current?.isReady) { setPhase("listening"); } else { startListening(); } };
-    speechSynthesisApi.speak(utterance);
-  }, [getSpeechSynthesisApi, startListening, language]);
+  }, [getSpeechSynthesisApi, language, startListeningAfterPlayback, stopTtsPlayback]);
 
   useEffect(() => {
     return () => {
@@ -785,7 +901,7 @@ function MicCheck({ done, onDone, language, allowSkip = true }: { done: boolean;
     };
   }, [getSpeechSynthesisApi, stopAll]);
 
-  const isBusy = phase === "requesting" || phase === "playing" || phase === "listening" || phase === "analyzing";
+  const isBusy = phase === "requesting" || phase === "playing" || phase === "connecting" || phase === "listening" || phase === "analyzing";
 
   return (
     <Card className="overflow-hidden">
@@ -812,6 +928,9 @@ function MicCheck({ done, onDone, language, allowSkip = true }: { done: boolean;
                 ))}
               </div>
             )}
+            {phase === "connecting" && (
+              <span className="text-[11px] text-muted-foreground">Starting microphone...</span>
+            )}
             {phase === "listening" && (
               <div className="flex flex-col items-center gap-1">
                 <div className="flex gap-1">
@@ -819,7 +938,7 @@ function MicCheck({ done, onDone, language, allowSkip = true }: { done: boolean;
                   <span className="text-[11px] font-medium text-destructive">Listening...</span>
                 </div>
                 {transcript && (
-                  <span className="max-w-[10rem] truncate text-[10px] text-muted-foreground">
+                  <span className="line-clamp-2 max-w-[10rem] text-center text-[10px] leading-tight text-foreground/80">
                     &quot;{transcript}&quot;
                   </span>
                 )}
@@ -848,12 +967,18 @@ function MicCheck({ done, onDone, language, allowSkip = true }: { done: boolean;
           {phase === "requesting" && (
             <Button size="sm" disabled className="w-full">
               <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-              Requesting access...
+              Requesting mic...
             </Button>
           )}
           {phase === "playing" && (
             <Button size="sm" variant="outline" onClick={() => { stopAll(); setPhase("idle"); }} className="w-full">
               Stop
+            </Button>
+          )}
+          {phase === "connecting" && (
+            <Button size="sm" disabled className="w-full">
+              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              Starting mic...
             </Button>
           )}
           {phase === "listening" && (
@@ -887,9 +1012,9 @@ function MicCheck({ done, onDone, language, allowSkip = true }: { done: boolean;
             {phase === "requesting" &&
               "Granting microphone access..."}
             {phase === "playing" &&
-              "The voice agent is speaking — listen carefully..."}
+              "The voice agent is speaking. Listening will start automatically."}
             {phase === "listening" &&
-              "Please say \"yes\" or \"I can hear you\" to confirm."}
+              "Speak briefly — any short phrase is fine — so we know the microphone is working."}
             {phase === "analyzing" &&
               "Checking your response..."}
             {phase === "confirm" && !done && allowSkip &&
@@ -1336,12 +1461,14 @@ export function IntervieweeOnboarding({
       return null;
     }
 
+    const mode = "voice" as const;
+
     const mockContext: InterviewContext = {
       title: interviewTitle,
       aiName: aiName ?? "AI Interviewer",
       aiTone: "professional",
       language: language ?? "en-US",
-      followUpDepth: "medium",
+      followUpDepth: DEFAULT_FOLLOW_UP_DEPTH,
       questions: Array.from({ length: questionCount }, (_, i) => ({
         text: `Question ${i + 1}`,
         type: questionTypes?.[i] ?? "OPEN_ENDED",
@@ -1350,7 +1477,7 @@ export function IntervieweeOnboarding({
     };
 
     return (
-      <IntervieweeTourProvider mode="voice">
+      <IntervieweeTourProvider mode={mode}>
         <PreviewWrapper onReady={handleComplete}>
           <VoiceInterface
             sessionId="__preview__"
@@ -1383,13 +1510,10 @@ export function IntervieweeOnboarding({
           <Button variant="outline" onClick={() => setStep("info")}>
             Back
           </Button>
-          <Button
-            disabled={!allChecksDone}
-            onClick={() => {
-              if (voiceEnabled) setStep("howItWorks");
-              else onComplete();
-            }}
-          >
+          <Button disabled={!allChecksDone} onClick={() => {
+            if (voiceEnabled) setStep("howItWorks");
+            else onComplete();
+          }}>
             Next
           </Button>
         </div>

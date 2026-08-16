@@ -7,10 +7,10 @@ import {
 } from "@/components/code-editor/code-editor-canvas";
 import { IntervieweeHelpPopover } from "@/components/session/interviewee-help-popover";
 import {
-  normalizeSessionEndReason,
-  SessionEndedScreen,
-  type SessionEndReason,
-  type SessionEndReasonInput,
+    normalizeSessionEndReason,
+    SessionEndedScreen,
+    type SessionEndReason,
+    type SessionEndReasonInput,
 } from "@/components/session/session-ended-screen";
 import {
     AlertDialog,
@@ -37,15 +37,19 @@ import {
     WhiteboardCanvas,
     type WhiteboardCanvasRef,
 } from "@/components/whiteboard/whiteboard-canvas";
+import {
+    useChunkLoadRecovery,
+    useSessionToolChunkPrefetch,
+} from "@/hooks/use-chunk-load-recovery";
 import { useInterviewRecording } from "@/hooks/use-interview-recording";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useVoice, type InterviewContext } from "@/hooks/use-voice";
 import {
     AlertCircle,
     Check,
+    ChevronDown,
     ChevronLeft,
     ChevronRight,
-    ChevronDown,
     ChevronUp,
     Clock,
     Code2,
@@ -400,6 +404,9 @@ export function VoiceInterface({
   videoMode = false,
   preview = false,
 }: VoiceInterfaceProps) {
+  useChunkLoadRecovery();
+  useSessionToolChunkPrefetch(!preview);
+
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
   const isMobile = useIsMobile();
@@ -440,6 +447,7 @@ export function VoiceInterface({
   const handleEndInterviewRef = useRef<
     (reason?: SessionEndReasonInput) => void
   >(() => {});
+  const getUnsentPayloadRef = useRef<() => string | null>(() => null);
 
   // ── Countdown timer state ────────────────────────────────────────
   const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
@@ -515,6 +523,20 @@ export function VoiceInterface({
   useEffect(() => {
     if (preview) return;
     const handleBeforeUnload = () => {
+      navigator.sendBeacon(
+        "/api/session/leave",
+        new Blob([JSON.stringify({ sessionId })], { type: "application/json" }),
+      );
+
+      // Persist any unsent transcript messages
+      const msgPayload = getUnsentPayloadRef.current();
+      if (msgPayload) {
+        navigator.sendBeacon(
+          "/api/voice/save",
+          new Blob([msgPayload], { type: "application/json" }),
+        );
+      }
+
       const active = drawingsRef.current[activeDrawingIdxRef.current];
       if (active) {
         const wb = whiteboardRef.current;
@@ -538,8 +560,27 @@ export function VoiceInterface({
       }
     };
 
+    const handlePageHide = () => {
+      navigator.sendBeacon(
+        "/api/session/leave",
+        new Blob([JSON.stringify({ sessionId })], { type: "application/json" }),
+      );
+      // Persist any unsent transcript messages
+      const msgPayload = getUnsentPayloadRef.current();
+      if (msgPayload) {
+        navigator.sendBeacon(
+          "/api/voice/save",
+          new Blob([msgPayload], { type: "application/json" }),
+        );
+      }
+    };
+
     window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+    window.addEventListener("pagehide", handlePageHide);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      window.removeEventListener("pagehide", handlePageHide);
+    };
   }, [sessionId, preview]);
 
   // ── Draggable divider state (vertical — left/right panels) ──────
@@ -662,6 +703,16 @@ export function VoiceInterface({
     setTimeout(() => setError(""), 5000);
   }, []);
 
+  const exportWhiteboardPngForRelay = useCallback(async () => {
+    const wb = whiteboardRef.current;
+    if (!wb?.hasContent()) return null;
+
+    const svgUrl = await wb.getImageDataUrl();
+    if (!svgUrl) return null;
+
+    return await svgToPngDataUrl(svgUrl);
+  }, []);
+
   const voice = useVoice({
     interviewId,
     sessionId,
@@ -671,7 +722,12 @@ export function VoiceInterface({
     onError: handleError,
     onTtsChunk: videoMode ? recording.addTtsChunk : undefined,
     onInterrupt: videoMode ? recording.cancelTts : undefined,
+    onWhiteboardSnapshotRequest: exportWhiteboardPngForRelay,
   });
+
+  useEffect(() => {
+    getUnsentPayloadRef.current = voice.getUnsentPayload;
+  }, [voice.getUnsentPayload]);
 
   useEffect(() => {
     if (voice.isConnected) {
@@ -791,17 +847,10 @@ export function VoiceInterface({
 
       // Send whiteboard image as PNG to relay for agent context
       // (Vision LLMs don't support SVG; we convert on the client)
-      const wb = whiteboardRef.current;
-      if (wb) {
-        wb.getImageDataUrl().then((svgUrl) => {
-          if (!svgUrl) return;
-          svgToPngDataUrl(svgUrl).then((pngUrl) => {
-            if (pngUrl) voice.sendWhiteboardUpdate(pngUrl);
-          }).catch(() => {});
-        }).catch(() => {});
-      }
+      const pngUrl = await exportWhiteboardPngForRelay();
+      if (pngUrl) voice.sendWhiteboardUpdate(pngUrl);
     },
-    [drawings, activeDrawingIdx, persistDrawing, voice],
+    [drawings, activeDrawingIdx, persistDrawing, voice, exportWhiteboardPngForRelay],
   );
 
   // ── Drawing management ────────────────────────────────────────
@@ -927,9 +976,11 @@ export function VoiceInterface({
         prev.map((d, i) => (i === activeDrawingIdx ? { ...d, snapshotData } : d)),
       );
       await persistDrawing(drawing, snapshotData, imageDataUrl ?? undefined);
+      const pngUrl = await exportWhiteboardPngForRelay();
+      if (pngUrl) voice.sendWhiteboardUpdate(pngUrl);
     }
     setSaveStatus("saved");
-  }, [drawings, activeDrawingIdx, persistDrawing]);
+  }, [drawings, activeDrawingIdx, persistDrawing, voice, exportWhiteboardPngForRelay]);
 
   // ── Code snippet persistence ────────────────────────────────────
   const persistCodeSnippet = useCallback(
@@ -1108,13 +1159,17 @@ export function VoiceInterface({
     }
   }, [drawings, activeDrawingIdx, persistDrawing, codeSnippets, activeSnippetIdx, persistCodeSnippet]);
 
-  const handlePreviousQuestion = useCallback(async () => {
-    await saveCurrentContent();
+  const handlePreviousQuestion = useCallback(() => {
+    void saveCurrentContent().catch((err) => {
+      console.error("[voice] Failed to save content before previous question:", err);
+    });
     voice.previousQuestion();
   }, [saveCurrentContent, voice]);
 
-  const handleNextQuestion = useCallback(async () => {
-    await saveCurrentContent();
+  const handleNextQuestion = useCallback(() => {
+    void saveCurrentContent().catch((err) => {
+      console.error("[voice] Failed to save content before next question:", err);
+    });
     voice.nextQuestion();
   }, [saveCurrentContent, voice]);
 
@@ -1209,7 +1264,6 @@ export function VoiceInterface({
       ]);
 
       try {
-        // Stop recording and save artifacts (video mode)
         if (videoMode && recording.isRecording) {
           const result = await withTimeout(recording.stop(), 8000, "stop recording");
           await withTimeout(
@@ -1251,6 +1305,14 @@ export function VoiceInterface({
     timerExpiredRef.current = true;
     handleEndInterviewRef.current("INTERVIEW_TIME_LIMIT_REACHED");
   }, [remainingSeconds]);
+
+  // ── Auto-end when server-side time limit is exceeded ────────────
+  const timeLimitTriggeredRef = useRef(false);
+  useEffect(() => {
+    if (!voice.timeLimitExceeded || locallyCompleted || timeLimitTriggeredRef.current) return;
+    timeLimitTriggeredRef.current = true;
+    onComplete?.("ACCOUNT_SESSION_TIME_LIMIT_REACHED");
+  }, [voice.timeLimitExceeded, locallyCompleted, onComplete]);
 
   // ── Scroll transcript to bottom ─────────────────────────────────
   const transcriptEndRef = useRef<HTMLDivElement>(null);
@@ -1313,6 +1375,7 @@ export function VoiceInterface({
     return () => clearTimeout(timer);
   }, [farewellReadyToClose, locallyCompleted]);
 
+  // Fallback: end after 8s when isInterviewComplete fires without a farewell
   useEffect(() => {
     if (!voice.isInterviewComplete || locallyCompleted || hasVisibleFarewell) return;
     const timer = setTimeout(() => {
@@ -1320,6 +1383,17 @@ export function VoiceInterface({
     }, 8000);
     return () => clearTimeout(timer);
   }, [voice.isInterviewComplete, locallyCompleted, hasVisibleFarewell]);
+
+  // Safety net: if isInterviewComplete is true but farewell path is stuck
+  // (e.g. tts_ended never arrived, isSpeaking stuck, audio context suspended),
+  // force-end after 15s to prevent sessions from staying IN_PROGRESS forever.
+  useEffect(() => {
+    if (!voice.isInterviewComplete || locallyCompleted) return;
+    const timer = setTimeout(() => {
+      handleEndInterviewRef.current();
+    }, 15_000);
+    return () => clearTimeout(timer);
+  }, [voice.isInterviewComplete, locallyCompleted]);
   const completionScreen = (
     <SessionEndedScreen reason={localCompletionReason} />
   );
@@ -1581,13 +1655,13 @@ export function VoiceInterface({
             <div className="relative flex min-h-0 flex-1 flex-col">
               {/* Minimized voice status bar */}
               <div className="flex items-center gap-3 border-b bg-card px-4 py-2">
-                {voice.isSpeaking && (
+                {showVoiceSpeaking && (
                   <div className="flex items-center gap-1.5 text-primary">
                     <Volume2 className="h-4 w-4 animate-pulse" />
                     <span className="text-xs font-medium">{aiName} speaking</span>
                   </div>
                 )}
-                {voice.isListening && (
+                {showVoiceListening && (
                   <div className="flex items-center gap-1.5 text-secondary-500">
                     <div className="relative h-4 w-4">
                       <Mic className="absolute inset-0 h-full w-full text-muted-foreground/30" />
@@ -1601,13 +1675,13 @@ export function VoiceInterface({
                     <span className="text-xs font-medium">Listening</span>
                   </div>
                 )}
-                {voice.isProcessing && (
+                {showVoiceProcessing && (
                   <div className="flex items-center gap-1.5 text-muted-foreground">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     <span className="text-xs font-medium">Thinking</span>
                   </div>
                 )}
-                {voice.isTransitioning && (
+                {showVoiceTransitioning && (
                   <div className="flex items-center gap-1.5 text-muted-foreground">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     <span className="text-xs font-medium">
@@ -1615,14 +1689,14 @@ export function VoiceInterface({
                     </span>
                   </div>
                 )}
-                {!voice.isSpeaking && !voice.isListening && !voice.isProcessing && !voice.isTransitioning && (
+                {!showVoiceSpeaking && !showVoiceListening && !showVoiceProcessing && !showVoiceTransitioning && (
                   <span className="text-xs text-muted-foreground">
                     {voice.isConnected
                       ? `Voice active — ${whiteboardActive ? "draw" : "code"} freely`
                       : "Voice disconnected"}
                   </span>
                 )}
-                {voice.isListening && voice.userTranscript && (
+                {showVoiceListening && voice.userTranscript && (
                   <span className="ml-auto max-w-[50%] truncate text-xs text-muted-foreground italic">
                     &ldquo;{voice.userTranscript}&rdquo;
                   </span>
@@ -1895,14 +1969,15 @@ export function VoiceInterface({
             <div
               ref={voiceSplitContainerRef}
               data-tour="voice-status"
-              className={`flex flex-1 flex-col ${isMobile ? "min-h-0" : ""}`}
+              className="flex min-h-0 flex-1 flex-col"
             >
               <div
-                className={`flex flex-col items-center justify-center gap-8 ${
+                data-testid="voice-status-scroll"
+                className={`flex min-h-0 flex-col items-center gap-8 overflow-y-auto code-scrollbar [justify-content:safe_center] ${
                   isMobile
                     ? mobileTranscriptCollapsed
-                      ? "min-h-0 flex-1 py-4"
-                      : "min-h-0 shrink-0 py-4"
+                      ? "flex-1 py-4"
+                      : "shrink-0 py-4"
                     : "flex-1"
                 }`}
                 style={
@@ -1930,7 +2005,7 @@ export function VoiceInterface({
                       <span className="text-sm font-medium">Thinking...</span>
                     </div>
                     {(() => {
-                      const lastUserMsg = messages.filter((m) => m.role === "user").pop();
+                      const lastUserMsg = messages.filter(m => m.role === "user").pop();
                       const displayText = lastUserMsg?.content || voice.userTranscript;
                       return displayText ? (
                         <p className="max-w-md text-center text-sm text-muted-foreground">
@@ -2035,7 +2110,7 @@ export function VoiceInterface({
                   This is where the voice conversation happens
                 </p>
               )}
-              {voice.isConnected && !showVoiceListening && !showVoiceProcessing && !showVoiceSpeaking && (
+              {voice.isConnected && !voice.isListening && (
                 <p className="text-sm text-muted-foreground">
                   Click the mic to start speaking
                 </p>
@@ -2126,8 +2201,8 @@ export function VoiceInterface({
                                 </div>
                               </div>
                             ))}
-                            {voice.userTranscript && (
-                              <div className="flex items-start gap-1.5 text-sm animate-pulse">
+                            {(showVoiceListening || (showVoiceProcessing && messages[messages.length - 1]?.role !== "user")) && voice.userTranscript && (
+                              <div className={`flex items-start gap-1.5 text-sm${showVoiceListening ? " animate-pulse" : ""}`}>
                                 <Mic className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
                                 <div>
                                   <span className="font-medium text-secondary-600 dark:text-secondary-400">You:</span>{" "}
@@ -2156,6 +2231,7 @@ export function VoiceInterface({
                             })()}
                           </>
                         )}
+                        <div ref={transcriptEndRef} />
                       </div>
                     </ScrollArea>
                   )}
@@ -2263,8 +2339,8 @@ export function VoiceInterface({
                             </div>
                           </div>
                         ))}
-                        {voice.userTranscript && (
-                          <div className="flex items-start gap-1.5 text-sm animate-pulse">
+                        {(showVoiceListening || (showVoiceProcessing && messages[messages.length - 1]?.role !== "user")) && voice.userTranscript && (
+                          <div className={`flex items-start gap-1.5 text-sm${showVoiceListening ? " animate-pulse" : ""}`}>
                             <Mic className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
                             <div>
                               <span className="font-medium text-secondary-600 dark:text-secondary-400">You:</span>{" "}
@@ -2371,7 +2447,7 @@ export function VoiceInterface({
 
       {/* ── Bottom control bar (Zoom-like) ──────────────────── */}
       {(voice.isConnected || preview) && (
-        <div className={`relative flex items-center justify-center gap-2 border-t bg-card px-3 py-2 md:gap-6 md:px-6${preview ? " pointer-events-none" : ""}`}>
+        <div className={`relative flex shrink-0 items-center justify-center gap-2 border-t bg-card px-3 py-2 md:gap-6 md:px-6${preview ? " pointer-events-none" : ""}`}>
           {/* Timer — right-aligned on desktop only (mobile shows it in header) */}
           {remainingSeconds !== null && !isMobile && (
             <div className={`absolute right-3 flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium tabular-nums md:right-6 md:px-2.5 ${isTimeLow ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground"}`}>
@@ -2459,7 +2535,7 @@ export function VoiceInterface({
                 className="h-9 w-9 rounded-full"
                 onClick={handlePreviousQuestion}
                 disabled={
-                  voice.isTransitioning ||
+                  !voice.isConnected ||
                   voice.currentQuestionIndex <= 0
                 }
               >
@@ -2479,7 +2555,7 @@ export function VoiceInterface({
                 className="h-9 w-9 rounded-full"
                 onClick={handleNextQuestion}
                 disabled={
-                  voice.isTransitioning ||
+                  !voice.isConnected ||
                   voice.currentQuestionIndex >= voice.totalQuestions - 1
                 }
               >
@@ -2588,8 +2664,8 @@ export function VoiceInterface({
                         </div>
                       </div>
                     ))}
-                    {voice.userTranscript && (
-                      <div className="flex items-start gap-1.5 text-sm animate-pulse">
+                    {(showVoiceListening || (showVoiceProcessing && messages[messages.length - 1]?.role !== "user")) && voice.userTranscript && (
+                      <div className={`flex items-start gap-1.5 text-sm${showVoiceListening ? " animate-pulse" : ""}`}>
                         <Mic className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
                         <div>
                           <span className="font-medium text-secondary-600 dark:text-secondary-400">You:</span>{" "}

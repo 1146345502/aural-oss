@@ -14,6 +14,11 @@ type RelayConnection = {
   path: string;
 };
 
+type RelayMessage = {
+  path: string;
+  message: Record<string, unknown>;
+};
+
 let browser: Browser;
 let serverProcess: ChildProcess;
 let baseUrl = "";
@@ -108,6 +113,13 @@ async function readRelayConnections(page: Page): Promise<RelayConnection[]> {
   return page.evaluate(() => {
     const raw = window.sessionStorage.getItem("__functionalRelayConnections");
     return raw ? (JSON.parse(raw) as RelayConnection[]) : [];
+  });
+}
+
+async function readRelayMessages(page: Page): Promise<RelayMessage[]> {
+  return page.evaluate(() => {
+    const raw = window.sessionStorage.getItem("__functionalRelayMessages");
+    return raw ? (JSON.parse(raw) as RelayMessage[]) : [];
   });
 }
 
@@ -362,6 +374,90 @@ test("voice interview keeps Thinking visible until the agent response returns", 
   await context.close();
 });
 
+test("discarded ASR finals clear the voice processing state", async () => {
+  const context = await browser.newContext({ locale: "en-US" });
+  const page = await context.newPage();
+  await page.goto(
+    `${baseUrl}/functional-tests/voice?language=en&scenario=asr-cancelled`,
+  );
+  await waitForCondition(
+    async () =>
+      (await page.getByTestId("harness-ready").textContent()) === "true",
+    5_000,
+    "Expected functional voice harness mocks to be ready",
+  );
+  await page.getByRole("button", { name: "Start Voice Interview" }).click();
+
+  const voiceStatus = page.getByTestId("voice-status-scroll");
+  await waitForCondition(
+    async () =>
+      (await voiceStatus.getByText("Thinking...", { exact: true }).count()) > 0,
+    8_000,
+    "Expected the pending ASR final to show the processing indicator",
+  );
+  await waitForCondition(
+    async () =>
+      (await voiceStatus.getByText("Thinking...", { exact: true }).count()) === 0,
+    3_000,
+    "Expected the cancelled ASR final to clear the processing indicator",
+  );
+  assert.equal(
+    ((await voiceStatus.textContent()) ?? "").includes(
+      "Yes. And so I think communication is critical.",
+    ),
+    false,
+  );
+
+  await context.close();
+});
+
+test("long live transcripts scroll inside the voice panel without moving the controls", async () => {
+  const context = await browser.newContext({
+    locale: "en-US",
+    viewport: { width: 1280, height: 720 },
+  });
+  const page = await context.newPage();
+  await page.goto(
+    `${baseUrl}/functional-tests/voice?language=en&scenario=long-transcript-layout`,
+  );
+  await waitForCondition(
+    async () =>
+      (await page.getByTestId("harness-ready").textContent()) === "true",
+    5_000,
+    "Expected functional voice harness mocks to be ready",
+  );
+  await page.getByRole("button", { name: "Start Voice Interview" }).click();
+
+  const voiceStatusScroll = page.getByTestId("voice-status-scroll");
+  await waitForCondition(
+    async () =>
+      voiceStatusScroll.evaluate(
+        (element) => element.scrollHeight > element.clientHeight,
+      ),
+    10_000,
+    "Expected the long transcript to overflow inside the voice panel",
+  );
+
+  const scrollMetrics = await voiceStatusScroll.evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    contentTop:
+      element.firstElementChild?.getBoundingClientRect().top ?? 0,
+    panelTop: element.getBoundingClientRect().top,
+    scrollHeight: element.scrollHeight,
+    overflowY: getComputedStyle(element).overflowY,
+  }));
+  assert.equal(scrollMetrics.overflowY, "auto");
+  assert.ok(scrollMetrics.clientHeight > 0);
+  assert.ok(scrollMetrics.scrollHeight > scrollMetrics.clientHeight);
+  assert.ok(scrollMetrics.contentTop >= scrollMetrics.panelTop);
+
+  const controls = await page.locator('[data-tour="voice-progress"]').boundingBox();
+  assert.ok(controls);
+  assert.ok(controls.y + controls.height <= 720);
+
+  await context.close();
+});
+
 test("voice completion shows the farewell, waits for final save, and only then notifies the parent", async () => {
   const context = await browser.newContext({ locale: "en-US" });
   const page = await context.newPage();
@@ -426,6 +522,17 @@ test("voice completion shows the farewell, waits for final save, and only then n
   assert.equal(
     ((await page.locator("body").textContent()) ?? "").includes("Thank you!"),
     true,
+  );
+  const relayMessages = await readRelayMessages(page);
+  assert.equal(
+    relayMessages.some(
+      ({ path, message }) =>
+        path === "/ws/voice" &&
+        message.type === "playback_ended" &&
+        message.utteranceId === "functional-farewell-1",
+    ),
+    true,
+    "Expected the browser to acknowledge the completed relay utterance",
   );
 
   await context.close();

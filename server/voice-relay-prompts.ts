@@ -7,15 +7,15 @@
  * each template below.
  */
 import {
-    AI_TONE_ZH,
-    AI_TONE_ZH_DEFAULT,
-    type BiText,
-    bt,
-    INTERVIEW_MESSAGES,
-    QUESTION_TYPE_HINT,
-    QUESTION_TYPE_LABEL,
-    ROLE_LABELS,
-    SCREEN_PROMPT,
+  AI_TONE_ZH,
+  AI_TONE_ZH_DEFAULT,
+  type BiText,
+  bt,
+  INTERVIEW_MESSAGES,
+  QUESTION_TYPE_HINT,
+  QUESTION_TYPE_LABEL,
+  ROLE_LABELS,
+  SCREEN_PROMPT,
 } from "../src/lib/i18n";
 
 // ── Types ───────────────────────────────────────────────────────────
@@ -45,11 +45,37 @@ export interface ResponsePromptParams {
   latestInterviewerPrompt?: string;
   latestParticipantAnswer?: string;
   forceLanguage?: string;
+  isLastQuestion?: boolean;
 }
 
 /** For follow-up budget lines: mid-interview vs last question use different closing language */
 export interface FollowUpBudgetContext {
   isLastQuestion: boolean;
+}
+
+/**
+ * Tells the interviewer there is nothing after this question.
+ *
+ * "(5/5)" alone is not enough — the model still signs off with "let's move on to
+ * the next part of our discussion". The relay speaks its own wrap-up and
+ * farewell once the question closes, so the model must neither promise a next
+ * question nor deliver the goodbye itself.
+ */
+/** Keeps "append [NEXT]" from reading as "there is a next question to move to". */
+function noNextQuestionSuffix(ctx: FollowUpBudgetContext): BiText {
+  if (!ctx.isLastQuestion) return { zh: "", en: "" };
+  return {
+    zh: `（注意：这是最后一道题，收尾时不要说"进入下一题"或"下一部分"。）`,
+    en: ` (Note: this is the last question — when you close it, do not say you are moving on to the next question or the next part.)`,
+  };
+}
+
+export function lastQuestionNotice(p: ResponsePromptParams): BiText {
+  if (!p.isLastQuestion) return { zh: "", en: "" };
+  return {
+    zh: `\n**这是最后一道题（第${p.qNum}题，共${p.totalQs}题），后面没有任何问题了。** 收尾这道题时，绝对不要说"进入下一个问题""下一部分""接下来我们聊聊"这类话——没有下一题了。只需简短承接对方最后一点即可。${p.nextToken} 仍然表示"这道题结束了"，系统随后会自动询问对方还有什么要补充的，并说结束语；所以你自己不要说完整的告别语（如"感谢你今天的参与，再见"）。\n`,
+    en: `\n**This is the FINAL question (${p.qNum} of ${p.totalQs}) — nothing follows it.** When you close this topic, do NOT say things like "let's move on to the next question", "on to the next part of our discussion", or "next topic", because there is no next question. Just briefly acknowledge their last point. ${p.nextToken} still means "this question is done": the system then asks whether they have anything to add and delivers the closing, so do NOT say the full goodbye yourself (e.g. "thank you for your time today, goodbye").\n`,
+  };
 }
 
 // ── Spoken text templates ───────────────────────────────────────────
@@ -256,6 +282,12 @@ Note: ONLY categories 4 and 5 may include ${nextToken}. ONLY category 6 may incl
 Important: when you are asking the participant to explain their approach (category 2), you MUST NOT add ${nextToken} because you still need to hear their explanation.`,
       };
     },
+    awaitingAnswer(nextToken: string): BiText {
+      return {
+        zh: `受访者还没有真正回答当前这道题——他刚才说的是问候、确认你能不能听到，或者请你重复问题之类的内容。先自然地回应他，并确保当前问题已经清楚地摆在他面前。**绝对不要加 ${nextToken}**。`,
+        en: `The participant has not actually answered this question yet — their last turn was a greeting, a check that you can hear them, or a request to repeat the question. Respond to that naturally and make sure the current question is clearly on the table. **Do NOT add ${nextToken}.**`,
+      };
+    },
     pastLimit(nextToken: string, ctx: FollowUpBudgetContext): BiText {
       if (ctx.isLastQuestion) {
         return {
@@ -280,16 +312,31 @@ Important: when you are asking the participant to explain their approach (catego
         en: `You are at the follow-up limit for THIS question. Unless the participant's core point is still unclear, briefly acknowledge and append ${nextToken} to advance to the **next question only**. Do NOT imply the entire interview is ending — more questions follow. Skip ${nextToken} only if you truly need one more short exchange to clarify. If they asked you a question, answer briefly first.`,
       };
     },
-    oneLeft(nextToken: string): BiText {
+    oneLeft(nextToken: string, ctx: FollowUpBudgetContext): BiText {
+      const noNext = noNextQuestionSuffix(ctx);
       return {
-        zh: `你最多还能追问1次。只有在对方确实是在回答当前问题时才应用这个追问预算；如果他们是在和你交流或问你问题，先自然回应。如果回答已经充分和清晰，简短感谢并在末尾加上 ${nextToken}。否则可以追问一个相关细节。`,
-        en: `You have at most 1 follow-up left. Apply this follow-up budget only when the participant is actually answering the current question; if they are talking to you or asking a question, respond naturally first. If the answer is already sufficient, briefly acknowledge and append ${nextToken}. Otherwise ask one focused follow-up.`,
+        zh: `你最多还能追问1次。只有在对方确实是在回答当前问题时才应用这个追问预算；如果他们是在和你交流或问你问题，先自然回应。如果回答已经充分和清晰，简短感谢并在末尾加上 ${nextToken}。否则可以追问一个相关细节。${noNext.zh}`,
+        en: `You have at most 1 follow-up left. Apply this follow-up budget only when the participant is actually answering the current question; if they are talking to you or asking a question, respond naturally first. If the answer is already sufficient, briefly acknowledge and append ${nextToken}. Otherwise ask one focused follow-up.${noNext.en}`,
       };
     },
-    remaining(turnsLeft: number, nextToken: string): BiText {
+    remaining(turnsLeft: number, nextToken: string, ctx: FollowUpBudgetContext): BiText {
+      const noNext = noNextQuestionSuffix(ctx);
       return {
-        zh: `你还可以追问最多${turnsLeft}次。只有在对方确实是在回答当前问题时才应用这个追问预算；如果他们是在和你交流或问你问题，先自然回应。根据回答内容决定是否需要追问。如果回答已经充分完整，可以简短感谢并在末尾加上 ${nextToken}。`,
-        en: `You have up to ${turnsLeft} follow-ups remaining. Apply this follow-up budget only when the participant is actually answering the current question; if they are talking to you or asking a question, respond naturally first. Decide based on the answer content whether to probe further. If the answer is already thorough, acknowledge and append ${nextToken}.`,
+        zh: `你还可以追问最多${turnsLeft}次。只有在对方确实是在回答当前问题时才应用这个追问预算；如果他们是在和你交流或问你问题，先自然回应。根据回答内容决定是否需要追问。如果回答已经充分完整，可以简短感谢并在末尾加上 ${nextToken}。${noNext.zh}`,
+        en: `You have up to ${turnsLeft} follow-ups remaining. Apply this follow-up budget only when the participant is actually answering the current question; if they are talking to you or asking a question, respond naturally first. Decide based on the answer content whether to probe further. If the answer is already thorough, acknowledge and append ${nextToken}.${noNext.en}`,
+      };
+    },
+    /** The participant asked to skip; phrasing depends on whether anything follows. */
+    skipOverride(nextToken: string, ctx: FollowUpBudgetContext): BiText {
+      if (ctx.isLastQuestion) {
+        return {
+          zh: `⚠️ 受访者已明确要求跳过/结束当前问题。这是最后一道题，后面没有别的问题了。请简短回应（如"好的，没问题"），然后在回复末尾加上 ${nextToken}。不要说"进入下一题"，也不要自己说完整的告别语——系统会接着收尾。`,
+          en: `⚠️ The participant has EXPLICITLY asked to skip / move on. This is the LAST question — nothing follows it. Briefly acknowledge (e.g. "Sure, no problem") and append ${nextToken} at the end. Do NOT say you are moving to the next question, and do NOT deliver the full goodbye yourself — the system handles the closing.`,
+        };
+      }
+      return {
+        zh: `⚠️ 受访者已明确要求跳过/进入下一题。你必须简短回应（如"好的，没问题"），然后在回复末尾加上 ${nextToken}。不要试图继续提问或鼓励。`,
+        en: `⚠️ The participant has EXPLICITLY asked to skip / move on to the next question. You MUST briefly acknowledge (e.g. "Sure, no problem") and append ${nextToken} at the end. Do NOT try to help further or ask more questions.`,
       };
     },
   },
@@ -340,6 +387,7 @@ Important: when you are asking the participant to explain their approach (catego
 
       const guardZh = (p.correctionGuard || "") + (p.antiRepetition || "");
       const guardEn = (p.correctionGuard || "") + (p.antiRepetition || "");
+      const lastQ = lastQuestionNotice(p);
       const langInstr = p.forceLanguage
         ? `\n**语言要求：你必须用${p.forceLanguage === "en" ? "英文" : "中文"}回复，无论问题是什么语言。** / **Language: You MUST respond in ${p.forceLanguage === "en" ? "English" : "Chinese"}, regardless of the question language.**\n`
         : "";
@@ -347,7 +395,7 @@ Important: when you are asking the participant to explain their approach (catego
         zh: `你是面试官"${p.aiName}"，正在进行一场关于"${p.title}"的访谈。
 ${memZh}${recentZh}${latestExchangeZh}${langInstr}
 当前问题（第${p.qNum}/${p.totalQs}个）：「${p.qText}」${descZh}${p.choiceInstruction}
-${codeZh}${wbZh}${visibilityZh}
+${lastQ.zh}${codeZh}${wbZh}${visibilityZh}
 对话记录：
 ${p.history}
 ${guardZh}
@@ -376,7 +424,7 @@ ${p.followUpInstruction}
         en: `You are interviewer "${p.aiName}" conducting an interview about "${p.title}".
 ${memEn}${recentEn}${latestExchangeEn}${langInstr}
 Current question (${p.qNum}/${p.totalQs}): "${p.qText}"${descEn}${p.choiceInstruction}
-${codeEn}${wbEn}${visibilityEn}
+${lastQ.en}${codeEn}${wbEn}${visibilityEn}
 Conversation so far:
 ${p.history}
 ${guardEn}
@@ -430,6 +478,7 @@ Rules:
         : "";
       const guardZh = (p.correctionGuard || "") + (p.antiRepetition || "");
       const guardEn = (p.correctionGuard || "") + (p.antiRepetition || "");
+      const lastQ = lastQuestionNotice(p);
       const langInstr = p.forceLanguage
         ? `\n**语言要求：你必须用${p.forceLanguage === "en" ? "英文" : "中文"}回复，无论问题是什么语言。** / **Language: You MUST respond in ${p.forceLanguage === "en" ? "English" : "Chinese"}, regardless of the question language.**\n`
         : "";
@@ -437,7 +486,7 @@ Rules:
         zh: `你是面试官"${p.aiName}"，正在进行一场关于"${p.title}"的访谈。
 ${memZh}${recentZh}${latestExchangeZh}${noRequestionZh}${langInstr}
 当前问题（第${p.qNum}/${p.totalQs}个）：「${p.qText}」${descZh}${p.choiceInstruction}
-对方已发言${p.userTurns}轮。
+${lastQ.zh}对方已发言${p.userTurns}轮。
 
 对话记录：
 ${p.history}
@@ -471,7 +520,7 @@ ${p.followUpInstruction}
         en: `You are interviewer "${p.aiName}" conducting an interview about "${p.title}".
 ${memEn}${recentEn}${latestExchangeEn}${noRequestionEn}${langInstr}
 Current question (${p.qNum}/${p.totalQs}): "${p.qText}"${descEn}${p.choiceInstruction}
-The participant has spoken ${p.userTurns} time(s) so far.
+${lastQ.en}The participant has spoken ${p.userTurns} time(s) so far.
 
 Conversation so far:
 ${p.history}
