@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Bump pinned `nanoid` and `dompurify` overrides to close remaining Dependabot XSS and hang alerts.
 - Keep the animated AI border complete on cards with wide aspect ratios.
 - Follow-up limits now match the LIGHT / MODERATE / DEEP labels in interview settings.
 - Voice interviews keep long spoken turns intact, wait for real TTS playback end, and clear cancelled ASR UI.

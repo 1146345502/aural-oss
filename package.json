@@ -105,12 +105,12 @@
   },
   "overrides": {
     "@excalidraw/excalidraw": {
-      "nanoid": "3.3.16"
+      "nanoid": "3.3.18"
     },
     "@excalidraw/mermaid-to-excalidraw": {
-      "nanoid": "5.1.6"
+      "nanoid": "5.1.16"
     },
-    "dompurify": "3.4.12",
+    "dompurify": "3.4.13",
     "lodash-es": "4.18.1",
     "postcss": "$postcss",
     "sharp": "$sharp"
