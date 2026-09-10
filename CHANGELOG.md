@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Developer API access to session reports with refreshed media URLs and owner-scoped practice history/reports.
+- Candidate profile updates and advanced question fields through the Developer API.
+- Bulk session completion API with default preview, project/role checks, deduplication, and per-item results.
+
 - Simplified Chinese README with prominent language switching.
 - Browser-backed fallback for job-description URL imports blocked by anti-bot challenges.
 - Shared follow-up depth budget used by chat and both voice relays.
@@ -25,6 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Locale geo-hint can only promote to Chinese, never overwrite a Chinese browser locale.
 
 ### Fixed
+
+- Preserve AI/manual interview drafts when switching creation tabs; allow vertical prompt resizing.
+- Checkpoint screenshot metadata before recording uploads and merge media references on save.
+- Recover uploaded recordings/screenshots after interrupted saves and keep playback controls visible while loading.
+- Support Kimi K2.6 for reports while preserving self-hosted provider fallback order.
 
 - Bump pinned `nanoid` and `dompurify` overrides to close remaining Dependabot XSS and hang alerts.
 - Keep the animated AI border complete on cards with wide aspect ratios.

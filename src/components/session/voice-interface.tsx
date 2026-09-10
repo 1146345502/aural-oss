@@ -44,6 +44,7 @@ import {
 import { useInterviewRecording } from "@/hooks/use-interview-recording";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useVoice, type InterviewContext } from "@/hooks/use-voice";
+import { stopRecordingAfterMetadataCheckpoint } from "@/lib/recording-finalization";
 import {
     AlertCircle,
     Check,
@@ -1265,19 +1266,37 @@ export function VoiceInterface({
 
       try {
         if (videoMode && recording.isRecording) {
-          const result = await withTimeout(recording.stop(), 8000, "stop recording");
-          await withTimeout(
-            fetch("/api/trpc/session.saveRecording", {
+          const saveRecordingMetadata = async (metadata: Record<string, unknown>) => {
+            const response = await fetch("/api/trpc/session.saveRecording", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                json: {
-                  sessionId,
-                  audioRecordingUrl: result.audioUrl,
-                  audioDuration: result.audioDuration,
-                  screenshots: result.screenshots,
-                },
-              }),
+              body: JSON.stringify({ json: { sessionId, ...metadata } }),
+            });
+            if (!response.ok) {
+              throw new Error(`save recording failed with HTTP ${response.status}`);
+            }
+          };
+
+          const result = await withTimeout(
+            stopRecordingAfterMetadataCheckpoint({
+              screenshots: recording.screenshots.current,
+              persistScreenshots: (screenshots) => withTimeout(
+                saveRecordingMetadata({ screenshots }),
+                8000,
+                "checkpoint screenshot metadata",
+              ),
+              stopRecording: recording.stop,
+              onCheckpointError: (error) =>
+                console.error("[voice] Failed to checkpoint screenshot metadata:", error),
+            }),
+            45_000,
+            "stop recording",
+          );
+          await withTimeout(
+            saveRecordingMetadata({
+              audioRecordingUrl: result.audioUrl,
+              audioDuration: result.audioDuration,
+              screenshots: result.screenshots,
             }),
             8000,
             "save recording",

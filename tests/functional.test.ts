@@ -537,3 +537,30 @@ test("voice completion shows the farewell, waits for final save, and only then n
 
   await context.close();
 });
+
+
+test("interview creation preserves both drafts across tabs and allows prompt resizing", async () => {
+  const page = await browser.newPage();
+  try {
+    await page.goto(`${baseUrl}/functional-tests/interview-drafts`);
+    const prompt = page.locator('textarea:visible').first();
+    await prompt.fill("Design a backend engineering interview with practical debugging.");
+    const before = await prompt.boundingBox();
+    assert.ok(before);
+    assert.equal(await prompt.evaluate(el => getComputedStyle(el).resize), "vertical");
+    await page.mouse.move(before.x + before.width - 3, before.y + before.height - 3);
+    await page.mouse.down();
+    await page.mouse.move(before.x + before.width - 3, before.y + before.height + 100, { steps: 10 });
+    await page.mouse.up();
+    const afterResize = await prompt.boundingBox();
+    assert.ok(afterResize && afterResize.height > before.height + 50);
+    await page.getByRole("tab", { name: "Manual", exact: true }).click();
+    await page.getByLabel("Title", { exact: true }).fill("Manual draft title");
+    await page.getByRole("tab", { name: "AI Generator", exact: true }).click();
+    assert.equal(await prompt.inputValue(), "Design a backend engineering interview with practical debugging.");
+    assert.equal((await prompt.boundingBox())?.height, afterResize.height);
+    await page.getByRole("tab", { name: "Manual", exact: true }).click();
+    assert.equal(await page.getByLabel("Title", { exact: true }).inputValue(), "Manual draft title");
+    assert.equal(await page.getByRole("tabpanel").count(), 1, "Only the active draft is exposed to accessibility navigation");
+  } finally { await page.close(); }
+});

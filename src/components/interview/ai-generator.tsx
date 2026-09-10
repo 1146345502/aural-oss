@@ -689,7 +689,7 @@ export function AIGenerator({ projectId }: { projectId?: string } = {}) {
               return (
                 <>
                   {/* Textarea with attachment area */}
-                  <div className="rounded-md border bg-background focus-within:border-ring transition-colors">
+                  <div className="relative rounded-md border bg-background focus-within:border-ring transition-colors">
                     {/* Hidden file inputs */}
                     <input ref={jdFileRef} type="file" accept=".pdf" className="hidden" onChange={handleJdFile} />
                     <input ref={resumeFileRef} type="file" accept=".pdf" className="hidden" onChange={handleResumeFile} />
@@ -755,14 +755,14 @@ export function AIGenerator({ projectId }: { projectId?: string } = {}) {
                         }}
                         rows={4}
                         className={cn(
-                          "border-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 resize-none min-h-[96px] bg-transparent",
+                          "border-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 resize-y min-h-[128px] pb-10 bg-transparent",
                           hasHL && "text-transparent caret-foreground selection:bg-primary/20",
                         )}
                       />
                       {hasHL && segments && (
                         <div
                           aria-hidden
-                          className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words border border-transparent px-3 py-2 text-sm leading-normal"
+                          className="pointer-events-none absolute inset-x-0 top-0 bottom-10 overflow-hidden whitespace-pre-wrap break-words border border-transparent px-3 py-2 text-sm leading-normal"
                         >
                           {segments.map((seg, j) =>
                             typeof seg === "string" ? (
@@ -780,8 +780,8 @@ export function AIGenerator({ projectId }: { projectId?: string } = {}) {
                       )}
                     </div>
 
-                    {/* Bottom toolbar: JD & Resume buttons (right-aligned) */}
-                    <div className="flex items-center justify-end gap-1.5 px-3 pb-2">
+                    {/* Reserve textarea padding for the toolbar and leave the resize corner clear. */}
+                    <div className="absolute bottom-2 right-4 flex items-center justify-end gap-1.5">
                       {/* JD button */}
                       <Popover open={jdPopoverOpen} onOpenChange={(open) => { setJdPopoverOpen(open); if (!open) setJdUrlInput(""); }}>
                         <PopoverTrigger asChild>

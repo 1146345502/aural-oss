@@ -47,7 +47,7 @@ export const REPORT_MODEL = process.env.OPENAI_API_KEY
   : process.env.GEMINI_API_KEY
     ? "gemini-3.1-flash-lite"
     : process.env.KIMI_API_KEY
-      ? "kimi-k2.5"
+      ? "kimi-k2.6"
       : "MiniMax-M2.1-lightning";
 
 /**

@@ -1,3 +1,4 @@
+import { featurePaths, candidateFeatureProperties, questionFeatureProperties } from "@/lib/api-openapi-features";
 /**
  * OpenAPI 3.1 document for the Developer API (`/api/v1`).
  * Served at GET /api/v1/openapi.json
@@ -30,10 +31,12 @@ To run an interview: 1. Create interview (\`POST /interviews\`), 2. Add question
     { name: "Questions", description: "Questions attached to an interview." },
     { name: "Sessions", description: "Completed or in-progress interview sessions." },
     { name: "Candidates", description: "Invited candidates and invite links." },
+    { name: "Practices", description: "Your practice sessions and reports." },
     { name: "Usage", description: "Usage snapshot for the organization tied to the API key." },
   ],
   security: [{ bearerAuth: [] }],
   paths: {
+    ...featurePaths,
     "/interviews": {
       get: {
         tags: ["Interviews"],
@@ -813,6 +816,7 @@ To run an interview: 1. Create interview (\`POST /interviews\`), 2. Add question
         type: "object",
         description: "Persisted question; API responses use `isRequired` and `probeOnShort`.",
         properties: {
+          ...questionFeatureProperties,
           id: { type: "string", example: "clx9qst456" },
           interviewId: { type: "string", example: "clx9abc123" },
           order: { type: "integer", minimum: 0, example: 0 },
@@ -839,6 +843,7 @@ To run an interview: 1. Create interview (\`POST /interviews\`), 2. Add question
         type: "object",
         required: ["text"],
         properties: {
+          ...questionFeatureProperties,
           text: { type: "string", minLength: 1 },
           type: { $ref: "#/components/schemas/QuestionType", default: "OPEN_ENDED" },
           order: {
@@ -856,6 +861,7 @@ To run an interview: 1. Create interview (\`POST /interviews\`), 2. Add question
         type: "object",
         minProperties: 1,
         properties: {
+          ...questionFeatureProperties,
           text: { type: "string", minLength: 1 },
           type: { $ref: "#/components/schemas/QuestionType" },
           order: { type: "integer", minimum: 0 },
@@ -931,6 +937,7 @@ To run an interview: 1. Create interview (\`POST /interviews\`), 2. Add question
       Candidate: {
         type: "object",
         properties: {
+          ...candidateFeatureProperties,
           id: { type: "string", example: "clx9cand001" },
           name: { type: "string", example: "Sam Rivera" },
           email: { type: ["string", "null"], example: "sam@example.com" },
@@ -945,6 +952,7 @@ To run an interview: 1. Create interview (\`POST /interviews\`), 2. Add question
       CandidateCreate: {
         type: "object",
         properties: {
+          ...candidateFeatureProperties,
           name: { type: "string", example: "Sam Rivera", default: "" },
           email: { type: "string", example: "sam@example.com" },
           phone: { type: "string", example: "+1-415-555-0100" },
@@ -962,7 +970,7 @@ To run an interview: 1. Create interview (\`POST /interviews\`), 2. Add question
               inviteUrl: {
                 type: "string",
                 format: "uri",
-                example: "https://your-host.example/invite/V1StGXR8_Z5jdHi6B",
+                example: "https://your-host.example/i/invite/V1StGXR8_Z5jdHi6B",
               },
               updatedAt: { type: "string", format: "date-time" },
             },

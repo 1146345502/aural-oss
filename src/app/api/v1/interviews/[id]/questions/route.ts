@@ -1,3 +1,4 @@
+import { apiQuestionDetailsSchema } from "@/lib/api-feature-schemas";
 import {
   apiError,
   isAuthError,
@@ -119,7 +120,9 @@ function normalizeOne(
       ? true
       : Boolean(raw.followUpEnabled);
 
-  return { order, text, type, isRequired, options, probeOnShort };
+  const details = apiQuestionDetailsSchema.safeParse(raw);
+  if (!details.success) return apiError("BAD_REQUEST", details.error.issues[0]!.message, 400);
+  return { ...details.data, order, text, type, isRequired, options, probeOnShort };
 }
 
 export async function GET(
@@ -191,15 +194,7 @@ export async function POST(
   for (const raw of parsed) {
     const normalized = normalizeOne(raw, nextOrder);
     if (normalized instanceof Response) return normalized;
-    rows.push({
-      interviewId,
-      order: normalized.order,
-      text: normalized.text,
-      type: normalized.type,
-      isRequired: normalized.isRequired,
-      options: normalized.options,
-      probeOnShort: normalized.probeOnShort,
-    });
+    rows.push({ ...normalized, interviewId });
     if (raw.order === undefined || raw.order === null) {
       nextOrder = normalized.order + 1;
     } else {

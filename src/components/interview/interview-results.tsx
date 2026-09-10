@@ -210,7 +210,6 @@ function SessionDetail({
     src: string;
     alt: string;
   } | null>(null);
-  const [audioCanPlay, setAudioCanPlay] = useState(false);
   const [exportProgress, setExportProgress] = useState("");
   const [exportPercent, setExportPercent] = useState(0);
   const reportRef = useRef<HTMLDivElement>(null);
@@ -1190,26 +1189,25 @@ function SessionDetail({
               );
             })()}
 
-            {/* Audio Recording — hidden until audio is loadable */}
-            {summary.data?.audioRecordingUrl && (
-              <Card className={cn(!audioCanPlay && "hidden")}>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Mic className="h-4 w-4" />
-                    Audio Recording
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <audio
-                    controls
-                    preload="auto"
-                    src={summary.data.audioRecordingUrl}
-                    className="w-full"
-                    onCanPlay={() => setAudioCanPlay(true)}
-                  />
-                </CardContent>
-              </Card>
-            )}
+            {/* Audio recordings remain visible while playback loads. */}
+            {(() => {
+              const recordings = summary.data?.audioRecordings?.length
+                ? summary.data.audioRecordings
+                : summary.data?.audioRecordingUrl
+                  ? [{ url: summary.data.audioRecordingUrl, segmentIndex: 0 }]
+                  : [];
+              if (!recordings.length) return null;
+              return (
+                <Card>
+                  <CardHeader><CardTitle className="flex items-center gap-2"><Mic className="h-4 w-4" />Audio Recording</CardTitle></CardHeader>
+                  <CardContent className="space-y-3">
+                    {recordings.map((rec) => (
+                      <audio controls preload="auto" src={rec.url} key={`${rec.segmentIndex}-${rec.url}`} className="w-full" />
+                    ))}
+                  </CardContent>
+                </Card>
+              );
+            })()}
 
             {/* Screenshots */}
             {(() => {

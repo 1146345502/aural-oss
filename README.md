@@ -572,6 +572,8 @@ npm run dev:openai-voice   # starts on port 8767
 
 ## Developer API
 
+Recent additions include candidate profile updates, advanced question settings, session reports with refreshed media URLs, owner-only practice reports, and bulk session completion. See [API additions and examples](docs/api-additions.md).
+
 Aural includes a full REST API for programmatic access to interviews, questions, sessions, and candidates. Use it to integrate Aural into your existing workflows, automate interview creation, or build custom integrations.
 
 ### Authentication

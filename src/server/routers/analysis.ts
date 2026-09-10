@@ -1,14 +1,8 @@
+import { extractStoragePath, mergeScreenshotEntries, resolveRecoveredPlaybackRecording, screenshotEntryFromStorageObject, type SessionRecordingEntry, type SessionScreenshotEntry } from "@/lib/session-media";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { getOrgMembership, hasProjectAccess, protectedProcedure, router } from "../trpc";
-
-interface ScreenshotEntry {
-  url: string;
-  path: string;
-  timestamp: string;
-  type: "camera" | "screen";
-}
 
 async function resolveSignedUrl(bucket: string, path: string): Promise<string | null> {
   const { data, error } = await supabaseAdmin.storage
@@ -16,6 +10,27 @@ async function resolveSignedUrl(bucket: string, path: string): Promise<string | 
     .createSignedUrl(path, 60 * 60 * 24); // 24 hours
   if (error || !data?.signedUrl) return null;
   return data.signedUrl;
+}
+
+async function resolveSignedUrls(
+  bucket: string,
+  paths: string[],
+): Promise<Map<string, string>> {
+  const uniquePaths = [...new Set(paths.filter(Boolean))];
+  if (uniquePaths.length === 0) return new Map();
+
+  const { data, error } = await supabaseAdmin.storage
+    .from(bucket)
+    .createSignedUrls(uniquePaths, 60 * 60 * 24); // 24 hours
+  if (error || !data) return new Map();
+
+  const urls = new Map<string, string>();
+  for (const entry of data) {
+    if (entry.path && entry.signedUrl) {
+      urls.set(entry.path, entry.signedUrl);
+    }
+  }
+  return urls;
 }
 
 export const analysisRouter = router({
@@ -53,31 +68,67 @@ export const analysisRouter = router({
         throw new TRPCError({ code: "FORBIDDEN", message: "You do not have access to this project" });
       }
 
-      // Generate fresh signed URLs for recordings and screenshots
+      // Generate fresh signed URLs for recordings and screenshots. Storage is
+      // the source of truth for uploaded files, so merge objects that survived
+      // an interrupted final metadata save back into the dashboard response.
       let audioRecordingUrl: string | null = null;
       if (session.audioRecordingUrl) {
-        // Extract path from stored URL or use directly if it's a path
         const storedUrl = session.audioRecordingUrl as string;
-        const pathMatch = storedUrl.match(/\/recordings\/(.+?)(?:\?|$)/);
-        if (pathMatch) {
-          audioRecordingUrl = await resolveSignedUrl("recordings", pathMatch[1]);
+        const storagePath = extractStoragePath(storedUrl, "recordings");
+        if (storagePath) {
+          audioRecordingUrl = await resolveSignedUrl("recordings", storagePath);
         }
         if (!audioRecordingUrl) {
           audioRecordingUrl = storedUrl;
         }
       }
 
-      let screenshots: ScreenshotEntry[] | null = null;
-      const rawScreenshots = session.screenshots as ScreenshotEntry[] | null;
-      if (rawScreenshots && rawScreenshots.length > 0) {
-        screenshots = await Promise.all(
-          rawScreenshots.map(async (s) => {
-            const signed = s.path
-              ? await resolveSignedUrl("screenshots", s.path)
-              : null;
-            return { ...s, url: signed || s.url };
-          }),
+      const rawScreenshots = (session.screenshots ?? []) as SessionScreenshotEntry[];
+      const { data: screenshotObjects } = await supabaseAdmin.storage
+        .from("screenshots")
+        .list(input.sessionId, { limit: 1000 });
+      const discoveredScreenshots = (screenshotObjects ?? [])
+        .map((file) => screenshotEntryFromStorageObject(input.sessionId, file))
+        .filter((entry): entry is SessionScreenshotEntry => entry !== null);
+      const mergedScreenshots = mergeScreenshotEntries(rawScreenshots, discoveredScreenshots);
+      let screenshots: SessionScreenshotEntry[] | null = null;
+      if (mergedScreenshots.length > 0) {
+        const signedScreenshotUrls = await resolveSignedUrls(
+          "screenshots",
+          mergedScreenshots.map((s) => s.path),
         );
+        screenshots = mergedScreenshots.map((s) => ({
+          ...s,
+          url: signedScreenshotUrls.get(s.path) || s.url,
+        }));
+      }
+
+      const rawRecordings = (session.audioRecordings ?? []) as SessionRecordingEntry[];
+      let audioRecordings = await Promise.all(
+        rawRecordings.map(async (r) => {
+          const storagePath = extractStoragePath(r.url, "recordings");
+          let signedUrl = r.url;
+          if (storagePath) {
+            signedUrl = (await resolveSignedUrl("recordings", storagePath)) ?? r.url;
+          }
+          return { ...r, url: signedUrl };
+        }),
+      );
+
+      const { data: recordingObjects } = await supabaseAdmin.storage
+        .from("recordings")
+        .list(input.sessionId, { limit: 100 });
+      const recoveredRecording = resolveRecoveredPlaybackRecording(
+        input.sessionId,
+        (session.audioRecordingUrl as string | null) ?? audioRecordingUrl,
+        recordingObjects ?? [],
+      );
+      if (recoveredRecording) {
+        const signedUrl = await resolveSignedUrl("recordings", recoveredRecording.url);
+        if (signedUrl) {
+          audioRecordingUrl = signedUrl;
+          audioRecordings = [{ ...recoveredRecording, url: signedUrl }];
+        }
       }
 
       return {
@@ -94,6 +145,7 @@ export const analysisRouter = router({
         messages: session.messages,
         totalDurationSeconds: session.totalDurationSeconds,
         audioRecordingUrl,
+        audioRecordings,
         audioDuration: (session as Record<string, unknown>).audioDuration as number | null,
         screenshots,
         antiCheatingLog: (session as Record<string, unknown>).antiCheatingLog as

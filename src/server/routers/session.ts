@@ -1,3 +1,4 @@
+import { mergeRecordingEntries, mergeScreenshotEntries, shouldReplaceRecordingReference, type SessionRecordingEntry, type SessionScreenshotEntry } from "@/lib/session-media";
 import { createLogger } from "@/lib/logger";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
@@ -520,7 +521,7 @@ export const sessionRouter = router({
       const now = new Date();
       const duration = Math.round((now.getTime() - actualStart) / 1000);
 
-      await ctx.supabase
+      const { error: completionError } = await ctx.supabase
         .from("sessions")
         .update({
           status: "COMPLETED" as const,
@@ -529,6 +530,8 @@ export const sessionRouter = router({
           totalDurationSeconds: duration,
         })
         .eq("id", input.id);
+
+      if (completionError) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: completionError.message });
 
       return { success: true };
     }),
@@ -704,7 +707,8 @@ export const sessionRouter = router({
       z.object({
         sessionId: z.string(),
         audioRecordingUrl: z.string().optional(),
-        audioDuration: z.number().optional(),
+        audioDuration: z.number().nullable().optional(),
+        segmentIndex: z.number().optional(),
         screenshots: z
           .array(
             z.object({
@@ -718,15 +722,49 @@ export const sessionRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      const needsExistingMedia =
+        input.screenshots !== undefined || input.audioRecordingUrl !== undefined;
+      const { data: storedSession, error: mediaReadError } = needsExistingMedia
+        ? await ctx.supabase
+            .from("sessions")
+            .select("audioRecordingUrl, audioRecordings, screenshots")
+            .eq("id", input.sessionId)
+            .single()
+        : { data: null, error: null };
+
+      if (mediaReadError) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: mediaReadError.message });
+
       const updateData: Record<string, unknown> = {};
-      if (input.audioRecordingUrl) {
+      const shouldReplacePrimaryRecording = input.audioRecordingUrl
+        ? shouldReplaceRecordingReference(
+            storedSession?.audioRecordingUrl as string | null | undefined,
+            input.audioRecordingUrl,
+          )
+        : true;
+      if (input.audioRecordingUrl && shouldReplacePrimaryRecording) {
         updateData.audioRecordingUrl = input.audioRecordingUrl;
       }
-      if (input.audioDuration !== undefined) {
+      if (input.audioDuration !== undefined && shouldReplacePrimaryRecording) {
         updateData.audioDuration = input.audioDuration;
       }
-      if (input.screenshots) {
-        updateData.screenshots = input.screenshots;
+      if (input.screenshots !== undefined) {
+        updateData.screenshots = mergeScreenshotEntries(
+          (storedSession?.screenshots ?? []) as SessionScreenshotEntry[],
+          input.screenshots,
+        );
+      }
+
+      if (input.audioRecordingUrl && input.segmentIndex !== undefined) {
+        const entry: SessionRecordingEntry = {
+          url: input.audioRecordingUrl,
+          duration: input.audioDuration ?? null,
+          segmentIndex: input.segmentIndex,
+          timestamp: new Date().toISOString(),
+        };
+        updateData.audioRecordings = mergeRecordingEntries(
+          (storedSession?.audioRecordings ?? []) as SessionRecordingEntry[],
+          entry,
+        );
       }
 
       if (Object.keys(updateData).length === 0) {

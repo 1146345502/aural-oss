@@ -126,11 +126,12 @@ export default function NewInterviewPage() {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="ai">
+        {/* Keep both drafts mounted so switching tabs preserves form state. */}
+        <TabsContent value="ai" forceMount className="data-[state=inactive]:hidden">
           <AIGenerator projectId={projectId} />
         </TabsContent>
 
-        <TabsContent value="manual">
+        <TabsContent value="manual" forceMount className="data-[state=inactive]:hidden">
           <Card>
             <CardHeader>
               <CardTitle>{isZh ? "手动创建" : "Create Manually"}</CardTitle>

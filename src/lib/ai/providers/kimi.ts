@@ -3,12 +3,14 @@ import type { ChatCompletionMessageParam } from "openai/resources/chat/completio
 import { type LLMProvider, type GenerationParams, type LLMResponse, type LLMMessage } from "../types";
 
 // kimi-k2.5 does not allow temperature to be set — the API rejects custom values.
-const FIXED_TEMPERATURE_MODELS = new Set(["kimi-k2.5"]);
+const FIXED_TEMPERATURE_MODELS = new Set(["kimi-k2.5", "kimi-k2.6"]);
+
+const NON_THINKING_MODELS = new Set(["kimi-k2.6"]);
 
 export class KimiProvider implements LLMProvider {
   id = "kimi";
   name = "Moonshot Kimi";
-  models = ["kimi-k2.5", "kimi-k2-turbo", "moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"];
+  models = ["kimi-k2.6", "kimi-k2.5", "kimi-k2-turbo", "moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"];
   defaultModel = "moonshot-v1-8k";
 
   private client: OpenAI;
@@ -37,8 +39,11 @@ export class KimiProvider implements LLMProvider {
       ...(FIXED_TEMPERATURE_MODELS.has(model)
         ? {}
         : { temperature: params.temperature ?? 0.7 }),
+      ...(NON_THINKING_MODELS.has(model)
+        ? { thinking: { type: "disabled" } }
+        : {}),
       max_tokens: params.maxTokens ?? 2048,
-    });
+    } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming);
 
     const choice = response.choices[0];
     return {

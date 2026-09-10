@@ -1,3 +1,4 @@
+import { apiCandidateDetailsSchema } from "@/lib/api-feature-schemas";
 import { assertInterviewProjectAccess } from "@/app/api/v1/_lib/interview-access";
 import {
     apiError,
@@ -36,7 +37,7 @@ export async function GET(
   const { data: candidates, error } = await supabaseAdmin
     .from("candidates")
     .select(
-      "id, name, email, phone, notes, inviteToken, sessionId, createdAt",
+      "id, name, email, phone, notes, gender, birthday, education, school, major, graduationYear, workExperience, inviteToken, sessionId, createdAt",
     )
     .eq("interviewId", interviewId)
     .order("createdAt", { ascending: false });
@@ -96,7 +97,10 @@ export async function POST(
     const phone = typeof c.phone === "string" ? c.phone.trim() || null : null;
     const notes = typeof c.notes === "string" ? c.notes.trim() || null : null;
 
+    const details = apiCandidateDetailsSchema.safeParse(item);
+    if (!details.success) return apiError("BAD_REQUEST", details.error.issues[0]!.message, 400);
     rows.push({
+      ...details.data,
       interviewId,
       name,
       email: emailRaw || null,
@@ -110,7 +114,7 @@ export async function POST(
     .from("candidates")
     .insert(rows)
     .select(
-      "id, name, email, phone, notes, inviteToken, sessionId, createdAt, updatedAt",
+      "id, name, email, phone, notes, gender, birthday, education, school, major, graduationYear, workExperience, inviteToken, sessionId, createdAt, updatedAt",
     );
 
   if (error) {
@@ -119,7 +123,7 @@ export async function POST(
 
   const data = (created ?? []).map((row) => ({
     ...row,
-    inviteUrl: `${APP_BASE}/invite/${row.inviteToken as string}`,
+    inviteUrl: `${APP_BASE.replace(/\/$/, "")}/i/invite/${encodeURIComponent(row.inviteToken as string)}`,
   }));
 
   return Response.json({ data });

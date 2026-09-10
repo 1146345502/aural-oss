@@ -1,3 +1,4 @@
+import { apiQuestionDetailsSchema } from "@/lib/api-feature-schemas";
 import {
   apiError,
   isAuthError,
@@ -127,6 +128,10 @@ export async function PATCH(
     }
     update.probeOnShort = Boolean(raw.followUpEnabled);
   }
+
+  const details = apiQuestionDetailsSchema.safeParse(raw);
+  if (!details.success) return apiError("BAD_REQUEST", details.error.issues[0]!.message, 400);
+  Object.assign(update, details.data);
 
   if (Object.keys(update).length === 0) {
     return apiError("BAD_REQUEST", "No valid fields to update", 400);
