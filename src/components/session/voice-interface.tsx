@@ -77,7 +77,7 @@ function TranscriptProgress({ finishing }: { finishing: boolean }) {
   return (
     <span data-testid="transcription-progress" className="mt-1 flex items-center gap-1.5 text-xs font-medium text-secondary-600 dark:text-secondary-400">
       <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-secondary-500 motion-safe:animate-pulse" />
-      {finishing ? "Finishing transcription…" : "Transcribing…"}
+      {finishing ? "Finishing transcription…" : "Listening…"}
     </span>
   );
 }

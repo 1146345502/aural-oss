@@ -439,7 +439,7 @@ for (const reducedMotion of ["no-preference", "reduce"] as const) {
     assert.equal(await listening.locator('span[aria-hidden="true"]').evaluate(el => getComputedStyle(el).animationName), reducedMotion === "reduce" ? "none" : "pulse");
     const live = page.getByTestId("live-user-transcript");
     await live.waitFor({ state: "visible", timeout: 8_000 });
-    assert.equal((await live.getByTestId("transcription-progress").textContent())?.trim(), "Transcribing…");
+    assert.equal((await live.getByTestId("transcription-progress").textContent())?.trim(), "Listening…");
     assert.equal(await page.getByText("Transcribing your answer live", { exact: true }).count(), 0);
     const transcriptBounds = await live.locator("span.text-muted-foreground").boundingBox();
     const statusBounds = await live.getByTestId("transcription-progress").boundingBox();
@@ -450,7 +450,7 @@ for (const reducedMotion of ["no-preference", "reduce"] as const) {
     assert.ok((await processing.textContent())?.includes("Finishing transcription"));
     assert.equal((await processing.textContent())?.includes("Thinking"), false, "don't claim AI is generating a reply before ASR finishes");
     await listening.waitFor({ state: "visible", timeout: 3_000 });
-    assert.equal((await live.getByTestId("transcription-progress").textContent())?.trim(), "Transcribing…", "resumed speech returns to live transcription");
+    assert.equal((await live.getByTestId("transcription-progress").textContent())?.trim(), "Listening…", "resumed speech returns to listening");
     await waitForCondition(async () => ((await processing.textContent().catch(() => "")) ?? "").includes("Thinking"), 5_000);
     assert.equal(await page.getByTestId("transcription-progress").count(), 0, "transcription indicators stop after a final is accepted");
     await context.close();
