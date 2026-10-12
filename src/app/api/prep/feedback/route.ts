@@ -509,7 +509,7 @@ export async function POST(req: Request) {
           }
 
           try {
-            const { data: persisted } = await supabaseAdmin
+            const { data: persisted, error: persistError } = await supabaseAdmin
               .from("prep_attempts")
               .insert({
                 sessionId,
@@ -526,6 +526,10 @@ export async function POST(req: Request) {
               })
               .select("id, createdAt")
               .single();
+
+            if (persistError || !persisted?.id) {
+              throw new Error("Could not save practice feedback");
+            }
 
             let audioStoragePath: string | null = null;
             let audioPlaybackUrl: string | null = null;

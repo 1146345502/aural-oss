@@ -318,7 +318,7 @@ cp .env.example .env.local
 # Next.js 开发服务器
 npm run dev
 
-# 推荐的火山引擎豆包语音中继
+# 主语音中继（默认 Seed ASR，可选 Qwen ASR）
 npm run dev:voice
 
 # 或启动 Azure OpenAI Realtime 备用中继
@@ -326,6 +326,22 @@ npm run dev:openai-voice
 ```
 
 打开 [http://localhost:3000/register](http://localhost:3000/register) 注册，或访问 [http://localhost:3000/login](http://localhost:3000/login) 登录。
+
+#### 隔离的本地开发环境
+
+如需同时启动 Web 应用和主语音中继，并连接**本地 Supabase**，请使用独立配置：
+
+```bash
+cp .env.example .env.testing.local
+# 填入本地 Supabase 实例的密钥，以及本次测试需要的语音和 LLM 凭据。
+npm run dev:local
+```
+
+`SUPABASE_URL`、`NEXT_PUBLIC_SUPABASE_URL`、`DATABASE_URL`、`NEXT_PUBLIC_APP_URL` 及两个 `NEXT_PUBLIC_*VOICE_RELAY_URL` 必须使用回环地址。示例默认端口为 Web 3000、主中继 8766、备用中继 8767；Supabase 占位密钥必须替换为本地实例的实际密钥。
+
+启动器将 Web 和主中继绑定到 `127.0.0.1`，拒绝非本地的后端、应用及中继 URL，并屏蔽其他环境文件和父进程中的提供商凭据。本次需要的全部提供商密钥应填入 `.env.testing.local`。此文件已被 Git 忽略，原 `.env.local` 不会被改写。语音识别、合成和 LLM 请求仍会调用配置的提供商，只有应用、数据库和中继端点位于本地。
+
+此命令只启动主中继。单独启动相同服务前请先停止启动器。原有 `dev`、`dev:voice`、`dev:openai-voice` 命令仍使用常规环境配置。Qwen 的启用方式见下方“语音中继”。
 
 ---
 
@@ -365,6 +381,8 @@ aural-oss/
 | API | `src/server/routers/prep.ts`、`src/app/api/prep/` | 数据操作、反馈、追问、提示和离开接口 |
 | 数据模型 | `supabase/migrations/004_interview_prep.sql`、`supabase/migrations/005_account_delete_and_answer_bank.sql` | 练习上下文、会话、答题记录、个人答案库和 RLS 策略 |
 
+保存练习答题记录失败时，反馈流会返回保存警告，不再确认未保存的记录。界面仍可能显示已生成的反馈，但历史记录中不会出现这次未保存的回答。
+
 ---
 
 ## AI 提供商系统
@@ -384,17 +402,41 @@ Aural 需要至少配置一个 LLM 提供商。默认按 OpenAI → Gemini → K
 
 ## 语音中继
 
-Aural 通过独立 WebSocket 服务支持实时 AI 语音访谈。
+Aural 通过独立 WebSocket 服务支持实时 AI 语音访谈。主中继分开处理语音识别、语音合成和 LLM 回复。**默认识别提供商仍为 Seed**，也可显式选择 Qwen；语音合成继续使用豆包，Azure OpenAI Realtime 则作为独立备用中继。
 
-### 推荐：火山引擎豆包（`server/voice-relay.ts`）
+### 主中继：Seed 或 Qwen ASR + 豆包 TTS（`server/voice-relay.ts`）
 
-豆包中继提供更低延迟、自然的语音对话、中文支持、上下文摘要和自动重连。
+主中继支持按问题推进访谈、中英文识别、上下文摘要及自动重连。恢复连接时保留已识别内容并缓存新音频；转写修订会替换过时草稿。界面保持字幕稳定，区分转写、收尾和生成回复，并支持减少动态效果的系统设置。
 
 ```bash
 npm run dev:voice
 ```
 
-必需变量：`DOUBAO_APP_ID` + `DOUBAO_ACCESS_TOKEN`，或 `DOUBAO_API_KEY`。
+必需变量：Seed 识别需要 `DOUBAO_API_KEY`；选择 Qwen 时，识别改用对应 `dashscope.aliyuncs.com` 区域的 `QWEN_ASR_API_KEY`。所有主中继识别方案仍需要 `DOUBAO_APP_ID` + `DOUBAO_ACCESS_TOKEN` 用于 TTS，以及 `GEMINI_API_KEY` 等中继 LLM 密钥。
+
+### 可选 Qwen 转写
+
+在 `.env.local` 中配置；使用 `dev:local` 时则写入 `.env.testing.local`：
+
+```dotenv
+VOICE_ASR_PROVIDER=qwen-audio
+QWEN_ASR_API_KEY=your-matching-region-key
+QWEN_ASR_NOISE_THRESHOLD=
+NEXT_PUBLIC_VOICE_RELAY_PRIMARY=voice
+DOUBAO_ASR_END_WINDOW_MS=800
+```
+
+| `VOICE_ASR_PROVIDER` | 识别适配器 | 默认噪声阈值 |
+| --- | --- | --- |
+| `seed`（默认，未设置时也使用） | 火山引擎 Seed / BigModel 流式识别 | Seed 配置 |
+| `qwen` | `qwen3-asr-flash-realtime` | `0.3` |
+| `qwen-audio` | `qwen-audio-3.0-asr-flash-streaming` | `0.1` |
+
+两个 Qwen 适配器都连接 `dashscope.aliyuncs.com`，密钥须匹配该端点区域。密钥仅保存在服务端，不要添加 `NEXT_PUBLIC_` 前缀。此选择作用于主中继的麦克风检查、练习语音输入和语音访谈，不改变 Azure 中继独立的 `VOICE_ASR_PRIMARY` 配置。
+
+`QWEN_ASR_NOISE_THRESHOLD` 留空时使用适配器默认值，也可在 `-1` 到 `1` 之间调整；值越高越能抑制噪声，但可能漏掉轻声讲话。`DOUBAO_ASR_END_WINDOW_MS` 控制共享静音窗口。两个适配器使用访谈的中英文语言提示，Qwen Audio 还接收长度受限的访谈上下文。空转写修订可撤回当前草稿，不会删除重连前保留的内容。
+
+修改识别设置后重启主中继。恢复 Seed 时设为 `VOICE_ASR_PROVIDER=seed` 并提供 `DOUBAO_API_KEY`。修改 `NEXT_PUBLIC_*` 后，还需重启开发应用或重新构建生产应用。实际识别效果取决于麦克风、语言、网络及账户区域；离线回归测试不代表真实识别准确率或延迟。
 
 ### 备用：Azure OpenAI Realtime（`server/openai-voice-relay.ts`）
 
@@ -438,12 +480,13 @@ Authorization: Bearer dlv_your_key_here
 | 命令 | 说明 |
 |------|------|
 | `npm run dev` | 启动 Next.js 开发服务器 |
+| `npm run dev:local` | 使用隔离的本地 Supabase 配置启动 Web 和主中继 |
 | `npm run build` | 构建生产版本 |
 | `npm run start` | 启动生产服务器 |
 | `npm run lint` | 运行 ESLint |
 | `npm run test:web` | 运行 Web 测试 |
 | `npm run test:functional` | 运行基于 Playwright 的功能测试 |
-| `npm run dev:voice` | 启动豆包语音中继 |
+| `npm run dev:voice` | 启动主中继（Seed 或可选 Qwen ASR，豆包 TTS） |
 | `npm run dev:openai-voice` | 启动 Azure OpenAI 备用语音中继 |
 | `npm run db:types` | 重新生成 Supabase TypeScript 类型 |
 

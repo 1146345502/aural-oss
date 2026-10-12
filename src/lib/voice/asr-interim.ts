@@ -273,7 +273,9 @@ export function trimCrossTurnOverlap(previous: string, incoming: string): string
  * Keeps the buffer prefix (early interims the relay may not cover) but replaces
  * the overlapping tail with the clean relay text to avoid period-separated words.
  */
-export function mergeAsrFinal(buffer: string, relayFinal: string): string {
+export function mergeAsrFinal(buffer: string, relayFinal: string, transcriptMode?: unknown): string {
+  // A normalized relay snapshot is authoritative, even if it retracts words or is empty.
+  if (transcriptMode === "replace") return relayFinal.replace(/\s+/g, " ").trim();
   const buf = buffer.replace(/\s+/g, " ").trim();
   const fin = relayFinal.replace(/\s+/g, " ").trim();
   if (!buf) return fin;
@@ -342,7 +344,8 @@ function rawTextBeforeToken(rawText: string, tokenIndex: number): string {
   return rawText.slice(0, positions[tokenIndex].start).trim();
 }
 
-export function mergeClientAsrInterim(existing: string, incoming: string): string {
+export function mergeClientAsrInterim(existing: string, incoming: string, transcriptMode?: unknown): string {
+  if (transcriptMode === "replace") return incoming.replace(/\s+/g, " ").trim();
   const current = collapseAdjacentInterimRevisions(existing.replace(/\s+/g, " ").trim());
   const next = collapseAdjacentInterimRevisions(incoming.replace(/\s+/g, " ").trim());
   if (!current) return next;

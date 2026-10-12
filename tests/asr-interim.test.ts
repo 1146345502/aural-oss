@@ -3,6 +3,20 @@ import test from "node:test";
 
 import { cleanPeriodArtifacts, mergeAsrFinal, mergeClientAsrInterim, stripInterimPunctuation, stripIsolatedCjk, trimCrossTurnOverlap } from "@/lib/voice/asr-interim";
 
+test("authoritative Qwen drafts remove revised phantom words and preserve exact final correction", () => {
+  let draft = mergeClientAsrInterim("", "Thank you Hello we can hello", "replace");
+  draft = mergeClientAsrInterim(draft, "Hello. Can you hear me?", "replace");
+  assert.equal(draft, "Hello. Can you hear me?");
+  assert.equal(mergeAsrFinal("My name Yuen Yuan Ng nguyen", "My name is Qingyuan.", "replace"), "My name is Qingyuan.");
+  assert.equal(mergeAsrFinal("Thank you Hello we can hello. Can you hear me?", "Hello. Can you hear me?", "replace"), "Hello. Can you hear me?");
+});
+
+test("authoritative empty drafts/finals retract false speech without restoring stale text", () => {
+  assert.equal(mergeClientAsrInterim("Thank you", "", "replace"), "");
+  assert.equal(mergeAsrFinal("Thank you", "", "replace"), "");
+  assert.equal(mergeAsrFinal("Real speech", ""), "Real speech", "legacy no-text events retain speech");
+});
+
 test("client ASR interim keeps earlier speech when a trailing fragment arrives", () => {
   const first =
     "I also finetune the prompt quite a bit, in order to guide the model behavior.";

@@ -374,6 +374,89 @@ test("voice interview keeps Thinking visible until the agent response returns", 
   await context.close();
 });
 
+test("Qwen snapshots replace phantom drafts in the actual voice UI and allow empty retractions", async () => {
+  const context = await browser.newContext({ locale: "en-US" });
+  const page = await context.newPage();
+  await page.route("**/api/voice/save", (route) => route.fulfill({ status: 200, contentType: "application/json", body: '{"ok":true}' }));
+  await page.route("**/api/session/upload", (route) => route.fulfill({ status: 200, contentType: "application/json", body: '{"url":"","path":""}' }));
+  await page.goto(`${baseUrl}/functional-tests/voice?language=en&scenario=qwen-transcript-revision`);
+  await waitForCondition(async () => (await page.getByTestId("harness-ready").textContent()) === "true", 5_000);
+  await page.getByRole("button", { name: "Start Voice Interview" }).click();
+  const status = page.getByTestId("voice-status-scroll");
+  await waitForCondition(async () => ((await status.textContent()) ?? "").includes("Thank you Hello we can hello"), 8_000);
+  await waitForCondition(async () => ((await status.textContent()) ?? "").includes("Hello. Can you hear me"), 3_000);
+  assert.equal(((await status.textContent()) ?? "").includes("Thank you"), false);
+  // This harness has no microphone track, so later live drafts need not be visible.
+  // Allow the timed empty final to arrive and assert the committed transcript instead.
+  await delay(2_000);
+  const body = (await page.locator("body").textContent()) ?? "";
+  assert.equal(body.includes("Hello. Can you hear me?"), true);
+  assert.equal(body.includes("Thank you Hello we can hello"), false, "obsolete draft must not be committed to transcript");
+  assert.equal(body.includes("phantom revision"), false, "empty final must not promote discarded text");
+  await context.close();
+});
+
+test("live captions stay visible without pulsing across pending, resumed and final speech", async () => {
+  const context = await browser.newContext({ locale: "en-US" });
+  const page = await context.newPage();
+  await page.route("**/api/voice/save", (route) => route.fulfill({ status: 200, contentType: "application/json", body: '{"ok":true}' }));
+  await page.route("**/api/session/upload", (route) => route.fulfill({ status: 200, contentType: "application/json", body: '{"url":"","path":""}' }));
+  await page.goto(`${baseUrl}/functional-tests/voice?language=en&scenario=qwen-caption-stability`);
+  await waitForCondition(async () => (await page.getByTestId("harness-ready").textContent()) === "true", 5_000);
+  await page.getByRole("button", { name: "Start Voice Interview" }).click();
+  await page.getByTestId("live-user-transcript").waitFor({ state: "visible", timeout: 10_000 });
+  const caption = await page.getByTestId("voice-user-caption").elementHandle();
+  const live = await page.getByTestId("live-user-transcript").elementHandle();
+  assert.ok(caption && live);
+  // Sample through both processing/listening transitions: the same DOM nodes
+  // remain visible instead of disappearing or pulsing on each provider update.
+  for (let i = 0; i < 32; i++) {
+    assert.equal(await caption.evaluate(el => el.isConnected && el.getBoundingClientRect().height > 0), true);
+    assert.equal(await live.evaluate(el => el.isConnected && getComputedStyle(el).animationName === "none" && getComputedStyle(el).opacity === "1"), true);
+    assert.equal((await caption.textContent())?.includes("My earlier answer"), false, "current draft must take priority over a previous user turn");
+    await delay(60);
+  }
+  await page.getByTestId("live-user-transcript").waitFor({ state: "hidden", timeout: 3_000 });
+  assert.equal(await caption.evaluate(el => el.isConnected), true, "caption must survive final commit");
+  const final = "I start by understanding the problem. Then I define success and test scalability.";
+  assert.ok((await caption.textContent())?.includes(final));
+  await context.close();
+});
+
+for (const reducedMotion of ["no-preference", "reduce"] as const) {
+  test(`listening and transcription feedback reflects live speech and finalization (${reducedMotion})`, async () => {
+    const context = await browser.newContext({ locale: "en-US", reducedMotion });
+    const page = await context.newPage();
+    await page.route("**/api/voice/save", (route) => route.fulfill({ status: 200, contentType: "application/json", body: '{"ok":true}' }));
+    await page.route("**/api/session/upload", (route) => route.fulfill({ status: 200, contentType: "application/json", body: '{"url":"","path":""}' }));
+    await page.goto(`${baseUrl}/functional-tests/voice?language=en&scenario=listening-feedback`);
+    await waitForCondition(async () => (await page.getByTestId("harness-ready").textContent()) === "true", 5_000);
+    await page.getByRole("button", { name: "Start Voice Interview" }).click();
+    await page.locator('[data-tour="voice-mic"] button').click();
+    const listening = page.getByTestId("voice-listening-feedback");
+    await listening.waitFor({ state: "visible", timeout: 10_000 });
+    assert.ok((await listening.textContent())?.includes("TestInterviewer is listening"));
+    assert.equal(await listening.locator('span[aria-hidden="true"]').evaluate(el => getComputedStyle(el).animationName), reducedMotion === "reduce" ? "none" : "pulse");
+    const live = page.getByTestId("live-user-transcript");
+    await live.waitFor({ state: "visible", timeout: 8_000 });
+    assert.equal((await live.getByTestId("transcription-progress").textContent())?.trim(), "Transcribing…");
+    assert.equal(await page.getByText("Transcribing your answer live", { exact: true }).count(), 0);
+    const transcriptBounds = await live.locator("span.text-muted-foreground").boundingBox();
+    const statusBounds = await live.getByTestId("transcription-progress").boundingBox();
+    assert.ok(transcriptBounds && statusBounds && statusBounds.y >= transcriptBounds.y + transcriptBounds.height, "transcription status belongs below the text");
+    assert.equal(await live.evaluate(el => getComputedStyle(el).animationName), "none", "the transcript words must stay steady");
+    const processing = page.getByTestId("voice-processing-feedback");
+    await processing.waitFor({ state: "visible", timeout: 3_000 });
+    assert.ok((await processing.textContent())?.includes("Finishing transcription"));
+    assert.equal((await processing.textContent())?.includes("Thinking"), false, "don't claim AI is generating a reply before ASR finishes");
+    await listening.waitFor({ state: "visible", timeout: 3_000 });
+    assert.equal((await live.getByTestId("transcription-progress").textContent())?.trim(), "Transcribing…", "resumed speech returns to live transcription");
+    await waitForCondition(async () => ((await processing.textContent().catch(() => "")) ?? "").includes("Thinking"), 5_000);
+    assert.equal(await page.getByTestId("transcription-progress").count(), 0, "transcription indicators stop after a final is accepted");
+    await context.close();
+  });
+}
+
 test("discarded ASR finals clear the voice processing state", async () => {
   const context = await browser.newContext({ locale: "en-US" });
   const page = await context.newPage();
@@ -391,13 +474,13 @@ test("discarded ASR finals clear the voice processing state", async () => {
   const voiceStatus = page.getByTestId("voice-status-scroll");
   await waitForCondition(
     async () =>
-      (await voiceStatus.getByText("Thinking...", { exact: true }).count()) > 0,
+      (await voiceStatus.getByText("Finishing transcription…", { exact: true }).count()) > 0,
     8_000,
     "Expected the pending ASR final to show the processing indicator",
   );
   await waitForCondition(
     async () =>
-      (await voiceStatus.getByText("Thinking...", { exact: true }).count()) === 0,
+      (await voiceStatus.getByText("Finishing transcription…", { exact: true }).count()) === 0,
     3_000,
     "Expected the cancelled ASR final to clear the processing indicator",
   );

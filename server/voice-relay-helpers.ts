@@ -716,6 +716,15 @@ export function shouldHoldBargeInInterimForFinal(input: {
   );
 }
 
+/** Reconcile a task-local snapshot without letting it overwrite a previous task. */
+export function combineAsrSessionText(carried: string, current: string, authoritative: boolean): string {
+  // A new provider task only heard audio after the handoff. Its corrections own
+  // that task's draft, never the speech retained from the previous task.
+  if (!carried) return current;
+  if (authoritative) return [carried.trim(), current.trim()].filter(Boolean).join(" ");
+  return mergeAsrSegments(carried, current);
+}
+
 /**
  * Volcengine ASR streams are rolling hypotheses, not guaranteed deltas. Merge them as revisions
  * when they heavily overlap; append only when the incoming text is a true continuation.
@@ -873,6 +882,7 @@ function uncommittedAsrTail(sessionText: string, committedPrefix: string): strin
 export function deriveAsrSessionUpdate(
   state: AsrSessionState,
   packet: AsrResultPacket,
+  authoritative = false,
 ): AsrSessionUpdate {
   const utterances = packet.utterances ?? [];
 
@@ -895,6 +905,13 @@ export function deriveAsrSessionUpdate(
   const definite = newestSpokenDefinite ?? !!packet.isLastPackage;
 
   if (!sessionText) {
+    if (authoritative) {
+      const changed = !!state.lastEmittedText;
+      state.sessionText = "";
+      state.lastEmittedText = "";
+      state.lastEmittedDefinite = definite;
+      return { text: "", definite, changed };
+    }
     return { text: state.lastEmittedText, definite, changed: false };
   }
 
@@ -903,7 +920,9 @@ export function deriveAsrSessionUpdate(
   const text = uncommittedAsrTail(sessionText, state.committedPrefix);
   // Endpointing counts as news even when the wording is unchanged, but only while there is
   // uncommitted speech for it to apply to.
-  const changed = !!text && (
+  // An authoritative correction can retract only the uncommitted tail while
+  // keeping settled history. It must still clear the browser's previous draft.
+  const changed = (!!text || (authoritative && !!state.lastEmittedText)) && (
     normalizeAsrComparisonText(text) !== normalizeAsrComparisonText(state.lastEmittedText) ||
     definite !== state.lastEmittedDefinite
   );

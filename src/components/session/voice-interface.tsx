@@ -73,6 +73,15 @@ import {
 import { useTheme } from "next-themes";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+function TranscriptProgress({ finishing }: { finishing: boolean }) {
+  return (
+    <span data-testid="transcription-progress" className="mt-1 flex items-center gap-1.5 text-xs font-medium text-secondary-600 dark:text-secondary-400">
+      <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-secondary-500 motion-safe:animate-pulse" />
+      {finishing ? "Finishing transcription…" : "Transcribing…"}
+    </span>
+  );
+}
+
 interface Message {
   id: string;
   role: "user" | "assistant";
@@ -1335,8 +1344,23 @@ export function VoiceInterface({
 
   // ── Scroll transcript to bottom ─────────────────────────────────
   const transcriptEndRef = useRef<HTMLDivElement>(null);
+  const transcriptViewportRef = useRef<HTMLElement | null>(null);
+  const followTranscriptRef = useRef(true);
   useEffect(() => {
-    transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const viewport = transcriptEndRef.current?.closest<HTMLElement>("[data-radix-scroll-area-viewport]");
+    if (!viewport) return;
+    if (transcriptViewportRef.current !== viewport) {
+      transcriptViewportRef.current = viewport;
+      followTranscriptRef.current = true;
+    }
+    // Streaming revisions should not restart an animation or scroll the page.
+    // Stop following while the participant is reading earlier transcript text.
+    if (followTranscriptRef.current) viewport.scrollTop = viewport.scrollHeight;
+    const onScroll = () => {
+      followTranscriptRef.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 64;
+    };
+    viewport.addEventListener("scroll", onScroll);
+    return () => viewport.removeEventListener("scroll", onScroll);
   }, [messages, voice.aiTranscript, voice.userTranscript, voice.isProcessing]);
 
   useEffect(() => {
@@ -1427,10 +1451,23 @@ export function VoiceInterface({
   const showVoiceSpeaking =
     !showVoiceTransitioning && !showVoiceProcessing && voice.isSpeaking;
   const showVoiceListening =
+    voice.isConnected &&
     !showVoiceTransitioning &&
     !showVoiceProcessing &&
     !showVoiceSpeaking &&
     voice.isListening;
+  const showTranscribingWithoutMic =
+    voice.isTranscribing && !showVoiceTransitioning && !showVoiceSpeaking &&
+    !showVoiceProcessing && !showVoiceListening;
+  const processingLabel = voice.isTranscribing ? "Finishing transcription…" : "Thinking...";
+  const lastTranscriptMessage = messages[messages.length - 1];
+  const showLiveUserTranscript =
+    !showVoiceTransitioning && !showVoiceSpeaking && !!voice.userTranscript &&
+    !(lastTranscriptMessage?.role === "user" &&
+      normalizeTranscript(lastTranscriptMessage.content) === normalizeTranscript(voice.userTranscript));
+  const userCaption = !showVoiceTransitioning && !showVoiceSpeaking
+    ? voice.userTranscript || (showVoiceProcessing ? messages.filter(m => m.role === "user").pop()?.content : "")
+    : "";
 
   const codeEditorInitialData = useMemo(() => {
     const snippet = codeSnippets[activeSnippetIdx];
@@ -1681,9 +1718,9 @@ export function VoiceInterface({
                   </div>
                 )}
                 {showVoiceListening && (
-                  <div className="flex items-center gap-1.5 text-secondary-500">
+                  <div role="status" className="flex items-center gap-1.5 text-secondary-500">
                     <div className="relative h-4 w-4">
-                      <Mic className="absolute inset-0 h-full w-full text-muted-foreground/30" />
+                      <Mic className="absolute inset-0 h-full w-full text-secondary-500 motion-safe:animate-pulse" />
                       <div
                         className="absolute inset-0 overflow-hidden transition-[clip-path] duration-150 ease-out"
                         style={{ clipPath: `inset(${(1 - voice.audioLevel) * 100}% 0 0 0)` }}
@@ -1695,11 +1732,12 @@ export function VoiceInterface({
                   </div>
                 )}
                 {showVoiceProcessing && (
-                  <div className="flex items-center gap-1.5 text-muted-foreground">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    <span className="text-xs font-medium">Thinking</span>
+                  <div role="status" className="flex items-center gap-1.5 text-muted-foreground">
+                    <Loader2 className="h-4 w-4 motion-safe:animate-spin" />
+                    <span className="text-xs font-medium">{processingLabel}</span>
                   </div>
                 )}
+                {showTranscribingWithoutMic && <TranscriptProgress finishing={false} />}
                 {showVoiceTransitioning && (
                   <div className="flex items-center gap-1.5 text-muted-foreground">
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -1708,16 +1746,16 @@ export function VoiceInterface({
                     </span>
                   </div>
                 )}
-                {!showVoiceSpeaking && !showVoiceListening && !showVoiceProcessing && !showVoiceTransitioning && (
+                {!showVoiceSpeaking && !showVoiceListening && !showVoiceProcessing && !showVoiceTransitioning && !showTranscribingWithoutMic && (
                   <span className="text-xs text-muted-foreground">
                     {voice.isConnected
                       ? `Voice active — ${whiteboardActive ? "draw" : "code"} freely`
                       : "Voice disconnected"}
                   </span>
                 )}
-                {showVoiceListening && voice.userTranscript && (
+                {userCaption && (
                   <span className="ml-auto max-w-[50%] truncate text-xs text-muted-foreground italic">
-                    &ldquo;{voice.userTranscript}&rdquo;
+                    &ldquo;{userCaption}&rdquo;
                   </span>
                 )}
               </div>
@@ -2018,20 +2056,11 @@ export function VoiceInterface({
                   </div>
                 )}
                 {showVoiceProcessing && (
-                  <div className="flex flex-col items-center gap-3">
+                  <div role="status" data-testid="voice-processing-feedback" className="flex flex-col items-center gap-3">
                     <div className="flex items-center gap-2 text-muted-foreground">
-                      <Loader2 className="h-5 w-5 animate-spin" />
-                      <span className="text-sm font-medium">Thinking...</span>
+                      <Loader2 className="h-5 w-5 motion-safe:animate-spin" />
+                      <span className="text-sm font-medium">{processingLabel}</span>
                     </div>
-                    {(() => {
-                      const lastUserMsg = messages.filter(m => m.role === "user").pop();
-                      const displayText = lastUserMsg?.content || voice.userTranscript;
-                      return displayText ? (
-                        <p className="max-w-md text-center text-sm text-muted-foreground">
-                          &ldquo;{displayText}&rdquo;
-                        </p>
-                      ) : null;
-                    })()}
                   </div>
                 )}
                 {showVoiceSpeaking && (
@@ -2041,25 +2070,30 @@ export function VoiceInterface({
                   </div>
                 )}
                 {showVoiceListening && (
-                  <div className="flex flex-col items-center gap-3">
+                  <div role="status" data-testid="voice-listening-feedback" className="flex flex-col items-center gap-2">
                     {/* Mic icon with fill level */}
-                    <div className="relative h-10 w-10">
-                      <Mic className="absolute inset-0 h-full w-full text-muted-foreground/30" />
-                      <div
-                        className="absolute inset-0 overflow-hidden transition-[clip-path] duration-150 ease-out"
-                        style={{ clipPath: `inset(${(1 - voice.audioLevel) * 100}% 0 0 0)` }}
-                      >
-                        <Mic className="h-full w-full text-secondary-400" />
+                    <div className="relative flex h-16 w-16 items-center justify-center">
+                      <span aria-hidden="true" className="absolute inset-0 rounded-full bg-secondary-500/15 motion-safe:animate-pulse" />
+                      <div className="relative h-10 w-10">
+                        <Mic className="absolute inset-0 h-full w-full text-muted-foreground/30" />
+                        <div
+                          className="absolute inset-0 overflow-hidden transition-[clip-path] duration-150 ease-out"
+                          style={{ clipPath: `inset(${(1 - voice.audioLevel) * 100}% 0 0 0)` }}
+                        >
+                          <Mic className="h-full w-full text-secondary-400" />
+                        </div>
                       </div>
                     </div>
-                    <span className="text-sm font-medium text-secondary-500">Listening...</span>
+                    <span className="text-sm font-medium text-secondary-600 dark:text-secondary-400">{aiName} is listening</span>
+                    {!voice.isTranscribing && <span className="text-xs text-muted-foreground">Ready when you are — speak naturally</span>}
                   </div>
                 )}
+                {showTranscribingWithoutMic && <TranscriptProgress finishing={false} />}
 
-                {/* Live transcript while listening */}
-                {showVoiceListening && voice.userTranscript && (
-                  <p className="max-w-md text-center text-sm text-muted-foreground">
-                    &ldquo;{voice.userTranscript}&rdquo;
+                {/* Keep the same caption node through pauses and finalization. */}
+                {userCaption && (
+                  <p data-testid="voice-user-caption" className="max-w-md text-center text-sm text-muted-foreground">
+                    &ldquo;{userCaption}&rdquo;
                   </p>
                 )}
 
@@ -2129,14 +2163,9 @@ export function VoiceInterface({
                   This is where the voice conversation happens
                 </p>
               )}
-              {voice.isConnected && !voice.isListening && (
+              {voice.isConnected && !voice.isListening && !showVoiceProcessing && !showVoiceSpeaking && !showVoiceTransitioning && !voice.isTranscribing && (
                 <p className="text-sm text-muted-foreground">
                   Click the mic to start speaking
-                </p>
-              )}
-              {voice.isConnected && showVoiceListening && (
-                <p className="text-sm text-muted-foreground">
-                  Speak naturally — AI will respond automatically
                 </p>
               )}
               </div>
@@ -2220,19 +2249,20 @@ export function VoiceInterface({
                                 </div>
                               </div>
                             ))}
-                            {(showVoiceListening || (showVoiceProcessing && messages[messages.length - 1]?.role !== "user")) && voice.userTranscript && (
-                              <div className={`flex items-start gap-1.5 text-sm${showVoiceListening ? " animate-pulse" : ""}`}>
+                        {showLiveUserTranscript && (
+                          <div data-testid="live-user-transcript" className="flex items-start gap-1.5 text-sm">
                                 <Mic className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
                                 <div>
                                   <span className="font-medium text-secondary-600 dark:text-secondary-400">You:</span>{" "}
                                   <span className="text-muted-foreground">{voice.userTranscript}</span>
+                              {voice.isTranscribing && <TranscriptProgress finishing={showVoiceProcessing} />}
                                 </div>
                               </div>
                             )}
-                            {voice.isProcessing && !voice.aiTranscript && (
+                        {voice.isProcessing && !voice.isTranscribing && !voice.aiTranscript && (
                               <div className="flex items-start gap-1.5 text-sm text-muted-foreground">
                                 <Loader2 className="mt-0.5 h-3 w-3 shrink-0 animate-spin text-primary/60" />
-                                <span className="text-xs italic">Thinking...</span>
+                            <span className="text-xs italic">{processingLabel}</span>
                               </div>
                             )}
                             {voice.aiTranscript && (() => {
@@ -2358,19 +2388,20 @@ export function VoiceInterface({
                             </div>
                           </div>
                         ))}
-                        {(showVoiceListening || (showVoiceProcessing && messages[messages.length - 1]?.role !== "user")) && voice.userTranscript && (
-                          <div className={`flex items-start gap-1.5 text-sm${showVoiceListening ? " animate-pulse" : ""}`}>
+                            {showLiveUserTranscript && (
+                              <div data-testid="live-user-transcript" className="flex items-start gap-1.5 text-sm">
                             <Mic className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
                             <div>
                               <span className="font-medium text-secondary-600 dark:text-secondary-400">You:</span>{" "}
                               <span className="text-muted-foreground">{voice.userTranscript}</span>
+                                  {voice.isTranscribing && <TranscriptProgress finishing={showVoiceProcessing} />}
                             </div>
                           </div>
                         )}
-                        {voice.isProcessing && !voice.aiTranscript && (
+                            {voice.isProcessing && !voice.isTranscribing && !voice.aiTranscript && (
                           <div className="flex items-start gap-1.5 text-sm text-muted-foreground">
                             <Loader2 className="mt-0.5 h-3 w-3 shrink-0 animate-spin text-primary/60" />
-                            <span className="text-xs italic">Thinking...</span>
+                                <span className="text-xs italic">{processingLabel}</span>
                           </div>
                         )}
                         {voice.aiTranscript && (() => {
@@ -2683,12 +2714,13 @@ export function VoiceInterface({
                         </div>
                       </div>
                     ))}
-                    {(showVoiceListening || (showVoiceProcessing && messages[messages.length - 1]?.role !== "user")) && voice.userTranscript && (
-                      <div className={`flex items-start gap-1.5 text-sm${showVoiceListening ? " animate-pulse" : ""}`}>
+                    {showLiveUserTranscript && (
+                      <div data-testid="live-user-transcript" className="flex items-start gap-1.5 text-sm">
                         <Mic className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
                         <div>
                           <span className="font-medium text-secondary-600 dark:text-secondary-400">You:</span>{" "}
                           <span className="text-muted-foreground">{voice.userTranscript}</span>
+                          {voice.isTranscribing && <TranscriptProgress finishing={showVoiceProcessing} />}
                         </div>
                       </div>
                     )}

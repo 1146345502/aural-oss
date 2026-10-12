@@ -870,16 +870,17 @@ export function useVoice({
         }
 
         case "asr": {
-          // ASR transcript chunk from Volcengine — accumulate.
+          // Legacy packets merge; normalized Qwen snapshots replace the whole current draft.
           const results =
             (msg.data?.results as Array<Record<string, unknown>>) || [];
           if (results.length > 0) {
             const text = (results[0].text as string) || "";
-            if (text.trim()) {
+            if (text.trim() || msg.transcriptMode === "replace") {
               clearAsrProcessingTimer();
-              const merged = mergeClientAsrInterim(asrBufferRef.current, text);
+              const merged = mergeClientAsrInterim(asrBufferRef.current, text, msg.transcriptMode);
               asrBufferRef.current = merged;
-              startAsrInterimWatchdog(merged);
+              if (merged) startAsrInterimWatchdog(merged);
+              else clearAsrInterimWatchdog();
               const cleaned = cleanPeriodArtifacts(merged);
               const display = cleaned.replace(/\s+$/, "").replace(/[.!?。！？]+$/, "");
               setState((s) => ({ ...s, isProcessing: false, userTranscript: display }));
@@ -895,7 +896,7 @@ export function useVoice({
               ? msg.text.trim()
               : asrBufferRef.current;
           if (text.trim()) {
-            const merged = mergeClientAsrInterim(asrBufferRef.current, text);
+            const merged = mergeClientAsrInterim(asrBufferRef.current, text, msg.transcriptMode);
             asrBufferRef.current = merged;
             // The relay reports how long it will hold the turn open; mirror that countdown so the
             // indicator appears when the turn is actually committed, not during a pause.
@@ -904,7 +905,7 @@ export function useVoice({
                 ? msg.delayMs
                 : ASR_INTERIM_ACTIVE_SPEECH_HOLD_MS;
             startAsrProcessingTimer(merged, commitInMs);
-            if (!stateRef.current.isProcessing) {
+            if (!stateRef.current.isProcessing || msg.transcriptMode === "replace") {
               const cleaned = cleanPeriodArtifacts(merged);
               const display = cleaned.replace(/\s+$/, "").replace(/[.!?。！？]+$/, "");
               setState((s) => ({ ...s, userTranscript: display }));
@@ -933,14 +934,14 @@ export function useVoice({
           const finalFromRelay =
             typeof msg.text === "string" ? msg.text.trim() : "";
           let finalText = cleanPeriodArtifacts(
-            finalFromRelay
-              ? mergeAsrFinal(asrBufferRef.current, finalFromRelay)
+            finalFromRelay || msg.transcriptMode === "replace"
+              ? mergeAsrFinal(asrBufferRef.current, finalFromRelay, msg.transcriptMode)
               : asrBufferRef.current,
           );
           const lastTrackedUser = [...trackedMessagesRef.current]
             .reverse()
             .find((m) => m.role === "user");
-          if (lastTrackedUser?.content && finalText) {
+          if (msg.transcriptMode !== "replace" && lastTrackedUser?.content && finalText) {
             finalText = trimCrossTurnOverlap(lastTrackedUser.content, finalText);
           }
           const finalSource = typeof msg.source === "string" ? msg.source : "";
@@ -1472,6 +1473,9 @@ export function useVoice({
 
   return {
     ...state,
+    // The ASR buffer contains only the draft awaiting a relay final. This
+    // separates transcription progress from the subsequent interviewer reply.
+    isTranscribing: state.isConnected && !!state.userTranscript && !!asrBufferRef.current.trim(),
     connect,
     disconnect,
     startListening,

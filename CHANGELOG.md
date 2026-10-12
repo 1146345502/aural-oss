@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Optional Qwen realtime and Qwen Audio streaming transcription for the primary voice relay; Seed remains the default.
+- Isolated local web/voice launcher using a gitignored `.env.testing.local` and loopback backend checks.
 - Developer API access to session reports with refreshed media URLs and owner-scoped practice history/reports.
 - Candidate profile updates and advanced question fields through the Developer API.
 - Bulk session completion API with default preview, project/role checks, deduplication, and per-item results.
@@ -30,6 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Preserve recognized speech and buffered audio across ASR recovery; apply transcript corrections and empty retractions without retaining stale drafts.
+- Keep voice captions steady and distinguish live transcription, finalization, and reply generation with reduced-motion support.
+- Report failed practice-feedback saves instead of confirming an unsaved attempt.
 - Preserve AI/manual interview drafts when switching creation tabs; allow vertical prompt resizing.
 - Checkpoint screenshot metadata before recording uploads and merge media references on save.
 - Recover uploaded recordings/screenshots after interrupted saves and keep playback controls visible while loading.

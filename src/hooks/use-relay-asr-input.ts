@@ -202,20 +202,26 @@ export function useRelayAsrInput({
         onTranscriptRef.current(merged);
       };
 
-      const mergePartial = (partial: string) => {
+      let committedSnapshot = "";
+      const mergePartial = (partial: string, transcriptMode?: unknown) => {
         const chunk = partial.trim();
-        if (!chunk) return;
-        sessionBufferRef.current = mergeClientAsrInterim(
-          sessionBufferRef.current,
-          chunk,
-        );
+        if (!chunk && transcriptMode !== "replace") return;
+        sessionBufferRef.current = transcriptMode === "replace"
+          ? [committedSnapshot, chunk].filter(Boolean).join(" ")
+          : mergeClientAsrInterim(sessionBufferRef.current, chunk);
         publish();
       };
 
-      const commitUtterance = (finalText: string) => {
+      const commitUtterance = (finalText: string, transcriptMode?: unknown) => {
         const chunk = finalText.trim();
-        if (!chunk) return;
-        sessionBufferRef.current = mergeAsrFinal(sessionBufferRef.current, chunk);
+        if (!chunk && transcriptMode !== "replace") return;
+        if (transcriptMode === "replace") {
+          committedSnapshot = [committedSnapshot, chunk].filter(Boolean).join(" ");
+          sessionBufferRef.current = committedSnapshot;
+        } else {
+          sessionBufferRef.current = mergeAsrFinal(sessionBufferRef.current, chunk);
+          committedSnapshot = sessionBufferRef.current;
+        }
         publish();
       };
 
@@ -238,11 +244,11 @@ export function useRelayAsrInput({
           if (!listeningRef.current) return;
           if (msg.type === "asr") {
             const text = extractAsrText(msg);
-            if (text) mergePartial(text);
+            if (text || msg.transcriptMode === "replace") mergePartial(text, msg.transcriptMode);
           } else if (msg.type === "asr_ended") {
             const text = ((msg.text as string) || "").trim();
-            if (text) {
-              commitUtterance(text);
+            if (text || msg.transcriptMode === "replace") {
+              commitUtterance(text, msg.transcriptMode);
             } else if (sessionBufferRef.current.trim()) {
               publish();
             }

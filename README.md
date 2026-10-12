@@ -434,7 +434,7 @@ Edit `.env.local` with your credentials. At minimum you need:
 # Start the Next.js dev server
 npm run dev
 
-# Start the primary voice relay (Volcengine Doubao)
+# Start the primary voice relay (Seed ASR by default; optional Qwen ASR)
 npm run dev:voice
 
 # Or start the backup voice relay (Azure OpenAI Realtime)
@@ -442,6 +442,22 @@ npm run dev:openai-voice
 ```
 
 Open [http://localhost:3000/login](http://localhost:3000/login) to sign in, or [http://localhost:3000/register](http://localhost:3000/register) to create a new account.
+
+#### Isolated Local Development
+
+To start the web app and primary voice relay together against **local Supabase**, use a separate configuration file:
+
+```bash
+cp .env.example .env.testing.local
+# Fill in the keys from your local Supabase instance and your voice/LLM credentials.
+npm run dev:local
+```
+
+Keep `SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `DATABASE_URL`, `NEXT_PUBLIC_APP_URL`, and both `NEXT_PUBLIC_*VOICE_RELAY_URL` values on loopback addresses. The defaults in `.env.example` use app port 3000, primary relay port 8766, and backup relay port 8767. Set the local Supabase keys explicitly; the placeholder keys do not authenticate.
+
+The launcher binds the app and primary relay to `127.0.0.1`, rejects non-local backend/app/relay URLs, and masks settings from other env files and inherited provider credentials. Put every provider key needed for this run in `.env.testing.local`. The file is gitignored, and `.env.local` is left untouched. Recognition, speech synthesis, and LLM requests still use the providers you configure; only the app, database, and relay endpoints are local.
+
+Only the primary relay starts with this command. Stop the launcher before starting those same services separately. The regular `dev`, `dev:voice`, and `dev:openai-voice` commands continue to use the normal environment. See [Voice Relay](#voice-relay) to opt into Qwen transcription.
 
 ---
 
@@ -497,6 +513,8 @@ The practice module lets interview authors and candidates rehearse against an in
 
 Practice feedback uses the same LLM provider chain as interview generation. Voice practice also uses the voice relay and Doubao TTS settings from `.env.local`; answer audio is stored in the existing private `recordings` bucket.
 
+If saving a practice attempt fails, the feedback stream reports a save warning instead of confirming an unsaved attempt. Generated feedback can remain visible even when it was not saved to history.
+
 ---
 
 ## AI Provider System
@@ -534,17 +552,22 @@ Report generation uses a higher-capability model when OpenAI or Kimi is configur
 
 Aural supports real-time AI voice interviews via WebSocket relay servers. Two relay implementations are provided.
 
-> **Recommendation:** We strongly recommend using **Volcengine Doubao** as your primary voice relay. It delivers a noticeably better interview experience than the OpenAI Realtime model — lower latency, more natural speech-to-speech flow, superior Chinese language support, and built-in server-side auto-reconnect for reliability. The OpenAI relay is provided as a backup for environments where Volcengine credentials are unavailable.
+The primary relay separates speech recognition, speech synthesis, and interviewer replies. **Seed remains the default recognition provider.** You can opt into either Qwen adapter without changing the Doubao TTS service or relay LLM. Azure OpenAI Realtime remains a separate backup relay.
 
-### Primary (Recommended): Volcengine Doubao (`server/voice-relay.ts`)
+### Primary: Seed or Qwen ASR + Doubao TTS (`server/voice-relay.ts`)
 
-The recommended voice relay for production use. It provides full-featured Speech-to-Speech capabilities with per-question interview flow, LLM-powered context summarization, native Chinese language support, and automatic server-side reconnection (up to 3 retry attempts with backoff) for resilient voice sessions.
+The primary relay provides per-question interview flow, LLM-powered context summarization, English/Chinese recognition, and automatic server-side reconnection. It carries recognized speech across recovery, buffers audio while reconnecting, and accepts transcript corrections without accumulating obsolete drafts. The UI keeps live captions steady and distinguishes transcription, finalization, and reply generation, including reduced-motion feedback.
 
 ```bash
 npm run dev:voice          # starts on port 8766
 ```
 
-**Required env vars:** either `DOUBAO_APP_ID` + `DOUBAO_ACCESS_TOKEN`, or `DOUBAO_API_KEY`.
+**Required env vars:**
+
+- Seed ASR: `DOUBAO_API_KEY`.
+- Qwen ASR, when selected: `QWEN_ASR_API_KEY` for the configured `dashscope.aliyuncs.com` endpoint.
+- Doubao TTS, for all primary-relay ASR providers: `DOUBAO_APP_ID` and `DOUBAO_ACCESS_TOKEN`.
+- A relay LLM API key, such as `GEMINI_API_KEY`.
 
 **Recommended supporting env vars:**
 
@@ -556,9 +579,33 @@ npm run dev:voice          # starts on port 8766
 - `DOUBAO_TTS_RESOURCE_ID=seed-tts-2.0`
 - `DOUBAO_TTS_PCM_SAMPLE_LAYOUT=int16le`
 
+### Optional Qwen Transcription
+
+Set these variables in `.env.local`, or in `.env.testing.local` when using `npm run dev:local`:
+
+```dotenv
+VOICE_ASR_PROVIDER=qwen-audio
+QWEN_ASR_API_KEY=your-matching-region-key
+QWEN_ASR_NOISE_THRESHOLD=
+NEXT_PUBLIC_VOICE_RELAY_PRIMARY=voice
+DOUBAO_ASR_END_WINDOW_MS=800
+```
+
+| `VOICE_ASR_PROVIDER` | Recognition adapter | Default noise threshold |
+| --- | --- | --- |
+| `seed` (default, including when unset) | Volcengine Seed / BigModel streaming | Seed settings |
+| `qwen` | `qwen3-asr-flash-realtime` | `0.3` |
+| `qwen-audio` | `qwen-audio-3.0-asr-flash-streaming` | `0.1` |
+
+The Qwen adapters use `dashscope.aliyuncs.com`; obtain credentials for that endpoint's region. Keep `QWEN_ASR_API_KEY` server-side, without a `NEXT_PUBLIC_` prefix. Qwen selection applies to the primary relay's microphone checks, practice dictation, and voice interviews. It does not change the Azure relay's separate `VOICE_ASR_PRIMARY` setting.
+
+Leave `QWEN_ASR_NOISE_THRESHOLD` empty to use the selected adapter's default. Overrides must be between `-1` and `1`; higher values suppress more noise but may miss quiet speech. The shared `DOUBAO_ASR_END_WINDOW_MS` controls the silence window. Both adapters accept English/Chinese language hints; Qwen Audio also receives bounded interview context. Corrections replace the current draft, including empty retractions, while preserving speech carried over from an earlier connection.
+
+Restart the primary relay after changing ASR settings. To return to Seed, set `VOICE_ASR_PROVIDER=seed` and supply `DOUBAO_API_KEY`. Changes to browser-facing `NEXT_PUBLIC_*` settings require restarting the dev app or rebuilding the production app. Provider performance depends on your microphones, language mix, network, and account region; the offline regression tests do not measure live recognition accuracy or latency.
+
 ### Backup: Azure OpenAI Realtime (`server/openai-voice-relay.ts`)
 
-An alternative relay using Azure OpenAI's Realtime API (`gpt-realtime-1.5` by default). Use this when Volcengine credentials are unavailable or for English-only deployments. Note that the OpenAI relay may have higher latency and less natural conversational flow compared to Volcengine.
+An alternative relay using Azure OpenAI's Realtime API (`gpt-realtime-1.5` by default). It has its own recognition and voice configuration and can be used when primary-relay credentials are unavailable.
 
 ```bash
 npm run dev:openai-voice   # starts on port 8767
@@ -635,12 +682,13 @@ curl -X POST http://localhost:3000/api/v1/interviews/{id}/publish \
 | Command | Description |
 |---------|-------------|
 | `npm run dev` | Start Next.js dev server |
+| `npm run dev:local` | Start web + primary relay with isolated local Supabase configuration |
 | `npm run build` | Build for production |
 | `npm run start` | Start production server |
 | `npm run lint` | Run ESLint |
 | `npm run test:web` | Run web tests |
 | `npm run test:functional` | Run Playwright-backed functional browser tests |
-| `npm run dev:voice` | Start primary voice relay (Volcengine Doubao) |
+| `npm run dev:voice` | Start primary voice relay (Seed or optional Qwen ASR, Doubao TTS) |
 | `npm run dev:openai-voice` | Start backup voice relay (Azure OpenAI) |
 | `npm run db:types` | Regenerate Supabase TypeScript types |
 
