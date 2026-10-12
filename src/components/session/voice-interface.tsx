@@ -2250,7 +2250,7 @@ export function VoiceInterface({
                               </div>
                             ))}
                         {showLiveUserTranscript && (
-                          <div data-testid="live-user-transcript" className="flex items-start gap-1.5 text-sm">
+                          <div data-testid="live-user-transcript" className={`flex items-start gap-1.5 text-sm${voice.isTranscribing ? " motion-safe:animate-pulse" : ""}`}>
                                 <Mic className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
                                 <div>
                                   <span className="font-medium text-secondary-600 dark:text-secondary-400">You:</span>{" "}
@@ -2389,7 +2389,7 @@ export function VoiceInterface({
                           </div>
                         ))}
                             {showLiveUserTranscript && (
-                              <div data-testid="live-user-transcript" className="flex items-start gap-1.5 text-sm">
+                              <div data-testid="live-user-transcript" className={`flex items-start gap-1.5 text-sm${voice.isTranscribing ? " motion-safe:animate-pulse" : ""}`}>
                             <Mic className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
                             <div>
                               <span className="font-medium text-secondary-600 dark:text-secondary-400">You:</span>{" "}
@@ -2715,7 +2715,7 @@ export function VoiceInterface({
                       </div>
                     ))}
                     {showLiveUserTranscript && (
-                      <div data-testid="live-user-transcript" className="flex items-start gap-1.5 text-sm">
+                      <div data-testid="live-user-transcript" className={`flex items-start gap-1.5 text-sm${voice.isTranscribing ? " motion-safe:animate-pulse" : ""}`}>
                         <Mic className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
                         <div>
                           <span className="font-medium text-secondary-600 dark:text-secondary-400">You:</span>{" "}

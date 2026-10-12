@@ -396,7 +396,7 @@ test("Qwen snapshots replace phantom drafts in the actual voice UI and allow emp
   await context.close();
 });
 
-test("live captions stay visible without pulsing across pending, resumed and final speech", async () => {
+test("live captions stay visible while drafts pulse across pending and resumed speech", async () => {
   const context = await browser.newContext({ locale: "en-US" });
   const page = await context.newPage();
   await page.route("**/api/voice/save", (route) => route.fulfill({ status: 200, contentType: "application/json", body: '{"ok":true}' }));
@@ -409,10 +409,10 @@ test("live captions stay visible without pulsing across pending, resumed and fin
   const live = await page.getByTestId("live-user-transcript").elementHandle();
   assert.ok(caption && live);
   // Sample through both processing/listening transitions: the same DOM nodes
-  // remain visible instead of disappearing or pulsing on each provider update.
+  // remain visible while the draft pulses continuously across provider updates.
   for (let i = 0; i < 32; i++) {
     assert.equal(await caption.evaluate(el => el.isConnected && el.getBoundingClientRect().height > 0), true);
-    assert.equal(await live.evaluate(el => el.isConnected && getComputedStyle(el).animationName === "none" && getComputedStyle(el).opacity === "1"), true);
+    assert.equal(await live.evaluate(el => el.isConnected && getComputedStyle(el).animationName === "pulse"), true);
     assert.equal((await caption.textContent())?.includes("My earlier answer"), false, "current draft must take priority over a previous user turn");
     await delay(60);
   }
@@ -444,7 +444,7 @@ for (const reducedMotion of ["no-preference", "reduce"] as const) {
     const transcriptBounds = await live.locator("span.text-muted-foreground").boundingBox();
     const statusBounds = await live.getByTestId("transcription-progress").boundingBox();
     assert.ok(transcriptBounds && statusBounds && statusBounds.y >= transcriptBounds.y + transcriptBounds.height, "transcription status belongs below the text");
-    assert.equal(await live.evaluate(el => getComputedStyle(el).animationName), "none", "the transcript words must stay steady");
+    assert.equal(await live.evaluate(el => getComputedStyle(el).animationName), reducedMotion === "reduce" ? "none" : "pulse", "draft text pulses unless reduced motion is requested");
     const processing = page.getByTestId("voice-processing-feedback");
     await processing.waitFor({ state: "visible", timeout: 3_000 });
     assert.ok((await processing.textContent())?.includes("Finishing transcription"));
