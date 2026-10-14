@@ -23,6 +23,9 @@ jobs:
 
       - run: npm ci
 
+      - name: Dependency security audit
+        run: npm run audit:dependencies
+
       - name: Lint
         run: npm run lint
 

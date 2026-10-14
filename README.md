@@ -686,6 +686,7 @@ curl -X POST http://localhost:3000/api/v1/interviews/{id}/publish \
 | `npm run build` | Build for production |
 | `npm run start` | Start production server |
 | `npm run lint` | Run ESLint |
+| `npm run audit:dependencies` | Audit dependencies against the official npm registry |
 | `npm run test:web` | Run web tests |
 | `npm run test:functional` | Run Playwright-backed functional browser tests |
 | `npm run dev:voice` | Start primary voice relay (Seed or optional Qwen ASR, Doubao TTS) |

@@ -484,6 +484,7 @@ Authorization: Bearer dlv_your_key_here
 | `npm run build` | 构建生产版本 |
 | `npm run start` | 启动生产服务器 |
 | `npm run lint` | 运行 ESLint |
+| `npm run audit:dependencies` | 使用 npm 官方注册表审计依赖安全 |
 | `npm run test:web` | 运行 Web 测试 |
 | `npm run test:functional` | 运行基于 Playwright 的功能测试 |
 | `npm run dev:voice` | 启动主中继（Seed 或可选 Qwen ASR，豆包 TTS） |

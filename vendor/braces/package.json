@@ -1,0 +1,11 @@
+{
+  "name": "@aural/braces",
+  "version": "3.0.3-aural.1",
+  "private": true,
+  "description": "Locally patched braces 3.0.3 with bounded nesting and AST traversal",
+  "main": "index.js",
+  "license": "MIT",
+  "dependencies": {
+    "fill-range": "^7.1.1"
+  }
+}
