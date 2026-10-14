@@ -27,8 +27,8 @@
   <a href="https://github.com/1146345502/aural-oss/actions/workflows/ci.yml"><img src="https://github.com/1146345502/aural-oss/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" /></a>
   <a href="https://github.com/1146345502/aural-oss/releases/latest"><img src="https://img.shields.io/github/v/release/1146345502/aural-oss?color=orange" alt="最新版本" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT 许可证" /></a>
-  <img src="https://img.shields.io/badge/node-%3E%3D18-brightgreen" alt="Node 18+" />
-  <img src="https://img.shields.io/badge/Next.js-14-black" alt="Next.js 14" />
+  <img src="https://img.shields.io/badge/node-20.19%2B%20%7C%2022.13%2B-brightgreen" alt="Node 20.19+ or 22.13+" />
+  <img src="https://img.shields.io/badge/Next.js-16.4-black" alt="Next.js 16.4" />
   <img src="https://img.shields.io/badge/TypeScript-5-3178c6" alt="TypeScript" />
   <img src="https://img.shields.io/badge/Supabase-PostgreSQL-3ecf8e" alt="Supabase" />
 </p>
@@ -176,7 +176,7 @@ Aural 是一个可自主执行结构化访谈的 AI 平台。创建访谈并分�
 
 | 层级 | 技术 |
 |------|------|
-| 框架 | [Next.js 14](https://nextjs.org/)（App Router） |
+| 框架 | [Next.js 16.4](https://nextjs.org/)（App Router） |
 | 语言 | TypeScript |
 | 数据库 | [Supabase](https://supabase.com/)（PostgreSQL、Auth、Storage、RLS） |
 | API | [tRPC](https://trpc.io/) |
@@ -249,7 +249,7 @@ Aural 是一个可自主执行结构化访谈的 AI 平台。创建访谈并分�
 
 #### 前置要求
 
-- Node.js 18+ 和 npm
+- Node.js 20.19+、22.13+ 或 24+ 和 npm（CI 使用 Node 22）
 - Supabase 云项目，或通过 `supabase start` 启动的本地项目
 - 至少一个 LLM API 密钥：OpenAI、Google Gemini、Kimi 或 MiniMax
 - 如需语音访谈或语音练习，还需火山引擎豆包或 Azure OpenAI 语音凭据
@@ -259,7 +259,7 @@ Aural 是一个可自主执行结构化访谈的 AI 平台。创建访谈并分�
 ```bash
 git clone https://github.com/1146345502/aural-oss.git
 cd aural-oss
-npm install
+npm ci
 ```
 
 #### 2. 配置 Supabase

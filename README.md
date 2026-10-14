@@ -27,8 +27,8 @@
   <a href="https://github.com/1146345502/aural-oss/actions/workflows/ci.yml"><img src="https://github.com/1146345502/aural-oss/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" /></a>
   <a href="https://github.com/1146345502/aural-oss/releases/latest"><img src="https://img.shields.io/github/v/release/1146345502/aural-oss?color=orange" alt="Latest Release" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License" /></a>
-  <img src="https://img.shields.io/badge/node-%3E%3D20.9-brightgreen" alt="Node 20.9+" />
-  <img src="https://img.shields.io/badge/Next.js-14-black" alt="Next.js 14" />
+  <img src="https://img.shields.io/badge/node-20.19%2B%20%7C%2022.13%2B-brightgreen" alt="Node 20.19+ or 22.13+" />
+  <img src="https://img.shields.io/badge/Next.js-16.4-black" alt="Next.js 16.4" />
   <img src="https://img.shields.io/badge/TypeScript-5-3178c6" alt="TypeScript" />
   <img src="https://img.shields.io/badge/Supabase-PostgreSQL-3ecf8e" alt="Supabase" />
 </p>
@@ -268,7 +268,7 @@ Track all your interviews, sessions, and candidates from a unified dashboard. Or
 
 | Layer | Technology |
 |-------|-----------|
-| Framework | [Next.js 14](https://nextjs.org/) (App Router) |
+| Framework | [Next.js 16.4](https://nextjs.org/) (App Router) |
 | Language | TypeScript |
 | Database | [Supabase](https://supabase.com/) (PostgreSQL + Auth + Storage + RLS) |
 | API | [tRPC](https://trpc.io/) |
@@ -365,7 +365,7 @@ Run Aural on your own servers for full control over data, configuration, and cus
 
 #### Prerequisites
 
-- **Node.js** 20.9+ and npm
+- **Node.js** 20.19+, 22.13+, or 24+ and npm (Node 22 is used in CI)
 - **Supabase** project (cloud or local via `supabase start`)
 - **LLM API key** — at least one of: OpenAI, Google Gemini, Kimi (Moonshot), or MiniMax
 - **Voice relay credentials** — Volcengine Doubao (primary) or Azure OpenAI (backup), if you want voice interviews or voice practice
@@ -375,7 +375,7 @@ Run Aural on your own servers for full control over data, configuration, and cus
 ```bash
 git clone https://github.com/1146345502/aural-oss.git
 cd aural-oss
-npm install
+npm ci
 ```
 
 #### 2. Set Up Supabase
