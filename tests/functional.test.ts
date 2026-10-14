@@ -249,6 +249,7 @@ test("whiteboard renders and Mermaid conversion works with patched dependencies"
   );
 
   assert.equal(await page.getByTestId("mermaid-error").textContent(), "");
+  assert.equal(await page.getByTestId("mermaid-math-rendered").textContent(), "true");
   assert.deepEqual(pageErrors, []);
 
   await context.close();
