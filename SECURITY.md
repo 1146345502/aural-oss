@@ -40,21 +40,30 @@ on patched versions while their parent packages still request older versions.
 Browser tests cover the whiteboard, Mermaid conversion, and Mermaid math rendering
 to check compatibility with these overrides.
 
-### Unpatched build-tool dependency
+### Local fix for the unpatched upstream braces advisory
 
-As of October 14, 2026, `braces@3.0.3` is affected by
+Upstream `braces@3.0.3` is affected by
 [GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm): deeply nested
-brace patterns can exhaust the JavaScript stack. The advisory and npm registry
-currently list no patched release.
+brace patterns can exhaust the JavaScript stack. As of October 14, 2026, there is
+no patched upstream release.
 
-This dependency comes from the Tailwind, Sass, and ESLint globbing/file-watching
-toolchain. Aural does not import these globbing utilities in its application or
-voice-relay request handlers; its Tailwind content patterns are repository-owned.
-Do not feed untrusted glob patterns or build configuration into this toolchain.
-This limits exposure but does not patch the dependency.
+Aural carries a private local fork, `@aural/braces@3.0.3-aural.1`, in
+[`vendor/braces`](vendor/braces/README.md). It contains the original MIT-licensed
+runtime plus the reviewed depth guards proposed in upstream PR #87. The root
+`braces` dependency and override route every globbing/watcher consumer to this
+patched copy. The fork has a distinct name and version, with recorded source
+integrity and patch provenance.
 
-Keep the Dependabot alert open until a compatible upstream fix or replacement is
-available. `npm audit` still reports this advisory and the parent packages that
-depend on it; the repository is not audit-clean. Do not use `npm audit fix --force`
-to remove it by downgrading Next.js or Excalidraw, since that would undo reviewed
-security fixes or functionality.
+The patch limits brace/parenthesis nesting and AST traversal to 100 containers,
+rejects cyclic parent references during expansion, and prevents options from
+raising or disabling the depth cap. Regression tests exercise the installed
+module, malicious patterns and ASTs, transitive consumers, normal filesystem
+globs, and a process with a smaller JavaScript stack. Clean installs use the
+repository's `install-links=true` npm setting.
+
+Run `npm run audit:dependencies` against the official npm registry; CI also runs
+this audit. The local fork is not covered by the public registry advisory feed,
+so the attack regression tests remain required even when the registry audit is
+clean. Do not remove the fork until an upstream fixed release passes those same
+tests. See the vendor README for source integrity, patch provenance, and the
+removal procedure.
